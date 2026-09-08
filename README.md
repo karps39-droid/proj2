@@ -11,6 +11,7 @@ Trīs daļas:
 | **Rāpulis** | Atsākama, pieklājīga visas vietnes pārmeklēšana ar SQLite fronti — sitemap → OAI-PMH → saišu grafs. |
 | **Nolasītājs** | METS + ALTO (un TEI) parsēšana: no OCR blokiem uz veseliem rakstiem ar virsrakstu, datumu, lappusi un OCR ticamību. |
 | **Vecā druka** | Fraktur OCR tīrīšana, vecās ortogrāfijas pārrakstīšana mūsdienu rakstībā un vaicājumu paplašināšana pretējā virzienā. |
+| **Latviešu valoda** | Celmošana un locīšana, vārdnīca vecā `s`/`z` izšķiršanai, valodas noteikšana, latviskie datumi ar veco/jauno stilu, vēsturiskie vietvārdi. |
 
 Nav nevienas ārējas atkarības — tikai Python 3.11+ standarta bibliotēka.
 
@@ -32,7 +33,14 @@ python3 -m periodika crawl --resume
 # 3. Meklē un lasi
 python3 -m periodika search "sabiedrība"           # lokālajā indeksā
 python3 -m periodika search "sabiedrība" --site    # dzīvajā vietnē
+python3 -m periodika search "biedrība" --lang lv   # tikai latviešu raksti
 python3 -m periodika get <dokumenta-id> --both     # oriģināls + mūsdienu rakstība
+
+# 4. Latviešu valodas rīki atsevišķi
+python3 -m periodika lang raksts.txt                       # latviešu/vācu/krievu?
+python3 -m periodika date "1899. gada 1. (13.) maijā"      # vecais un jaunais stils
+python3 -m periodika places --name Jelgava                 # Mitau, Jelgawa, Митава
+python3 -m periodika expand "Jelgavas biedrība"            # visi meklējamie varianti
 ```
 
 ## Kā to pieslēgt Claude aģentam
@@ -69,6 +77,10 @@ Pieejamie rīki:
 | `periodika_normalize_text` | Vecā ortogrāfija / Fraktur OCR → mūsdienu latviešu rakstība. |
 | `periodika_expand_query` | Parāda, kā vārds meklējams vecajā rakstībā. |
 | `periodika_detect_orthography` | Novērtē 0..1, cik teksts ir "vecs". |
+| `periodika_detect_language` | Latviešu / vācu / krievu / igauņu — periodikā ir visas četras. |
+| `periodika_parse_date` | `1899. gada 1. (13.) maijā` → jaunais un vecais stils. |
+| `periodika_place_names` | `Jelgava` ↔ `Mitau` / `Jelgawa` / `Митава`. |
+| `periodika_split_sentences` | Teikumi, neapraujot `1899. g.`, `u.c.`, `lpp.` |
 | `periodika_probe` | Noskaidro vietnes galapunktus un saglabā profilu. |
 | `periodika_status` | Frontes, krātuves un HTTP statistika. |
 
@@ -114,6 +126,71 @@ bibliotēkas) un `periodika issue <ID>` katram no tiem.
    atsevišķi — sk. `NormalizeOptions`.
 5. **Oriģināls netiek zaudēts.** Katram dokumentam glabājas gan `text_raw`, gan
    `text_modern`; citātam vienmēr jālieto oriģinālais teksts.
+
+---
+
+## Latviešu valodas specializācija
+
+Vispārīgs rāpulis latviešu periodikā strādā slikti trīs iemeslu dēļ, un katram
+ir atsevišķa atbilde `periodika/latvian.py`.
+
+### 1. Locīšana
+
+Latviešu valoda ir stipri locīta, tāpēc `sabiedrība` un `sabiedrībām` bez
+morfoloģijas nesatiekas. Lokālais indekss glabā **celmoto** tekstu, un vietnes
+meklētājam tiek piedāvāti locījumi:
+
+```
+$ python3 -m periodika expand "Jelgavas biedrība"
+Jelgavas biedrība · Mitau biedrība · jelgava biedrība · Jelgavas biedrības
+· Jelgavas biedrībai · jelgawas beedriba · ſelgavas biedrība …
+```
+
+Locīšana strādā no **jebkuras** formas, ne tikai no pamatformas: `Jelgavas`
+tiek atpazīts kā ģenitīvs, nevis kā vīriešu dzimtes `-s` nominatīvs.
+
+### 2. Vecā `s` neviennozīmība
+
+Vecajā ortogrāfijā `s` apzīmē gan mūsdienu `s`, gan `z`. Noteikumi to atrisināt
+nevar — to var tikai vārdnīca:
+
+```
+ſirgi un ſeme  →  (noteikumi)  sirgi un seme  →  (vārdnīca)  zirgi un zeme
+```
+
+Iebūvētais saraksts (`periodika/data/lv_wordlist.txt`, ~400 vārdu) sedz
+biežākos gadījumus; lielāku var padot ar `PERIODIKA_LV_WORDLIST=/ceļš/līdz/vārdiem.txt`.
+
+### 3. Ne viss ir latviski
+
+periodika satur arī baltvācu un krievu presi. Latviešu vecās drukas noteikumus
+laist pāri vācu rakstam nozīmē to sabojāt (`Wenden` → `Venden`), tāpēc
+**vispirms tiek noteikta valoda**, un normalizācija notiek tikai latviešu
+tekstam. Vācu un krievu raksti tiek saglabāti neskarti ar atzīmi `cita valoda`,
+un tos var atlasīt: `periodika search "..." --lang de`.
+
+### Datumi ar veco un jauno stilu
+
+Līdz 1918. gadam Krievijas impērijas presē datumi ir Jūlija kalendārā, bieži
+abi stili vienā rindā:
+
+```
+$ python3 -m periodika date "Rīgā, 1899. gada 1. (13.) maijā"
+{"date": "1899-05-13", "date_old_style": "1899-05-01", "calendar": "abi stili"}
+```
+
+Ja stils nav norādīts, tiek pievienots `gregorian_if_julian`, lai datējumu var
+pārbaudīt. Atpazīst arī vecās drukas mēnešu nosaukumus (`Junijā`, `Nowembris`)
+un tautas mēnešus (`sērsnu mēnesis` → marts), pēdējos ar atzīmi par
+neviennozīmību — avoti tos vieno atšķirīgi.
+
+### Vēsturiskie vietvārdi
+
+Bez šīs tabulas meklēšana baltvācu un krievu presē neatrod neko:
+`Jelgava` = `Mitau` = `Jelgawa` = `Митава`, `Cēsis` = `Wenden`,
+`Daugavpils` = `Dünaburg` = `Двинск`. Tabula sedz Latvijas pilsētas, vēsturiskos
+novadus (`Vidzeme` = `Livland`) un biežāk minētos kaimiņus. Atrastie vietvārdi
+tiek pierakstīti katra dokumenta metadatos.
 
 ### Meklēšana abos virzienos
 
@@ -164,9 +241,12 @@ periodika/
   discovery.py    sitemap, OAI-PMH, probe
   crawl.py        atsākams rāpulis
   search.py       vietnes un lokālā meklēšana
+  latvian.py      celmošana, locīšana, leksikons, valodas noteikšana,
+                  datumi (vecais/jaunais stils), vēsturiskie vietvārdi
+  data/lv_wordlist.txt  latviešu vārdu saraksts s/z izšķiršanai
   cli.py          komandrinda
   mcp_server.py   MCP rīki Claude aģentam
-tests/            64 testi, bez tīkla (paraugi tests/fixtures/)
+tests/            104 testi, bez tīkla (paraugi tests/fixtures/)
 ```
 
 ## Testi

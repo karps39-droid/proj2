@@ -28,7 +28,16 @@ from .config import Config
 from .crawl import CrawlLimits, Crawler
 from .discovery import probe_site
 from .http_client import HttpClient
-from .orthography import expand_query, looks_old, normalize_article_text
+from .latvian import (
+    analyze_article,
+    detect_language,
+    expand_query_lv,
+    find_places,
+    parse_latvian_date,
+    place_variants,
+    split_sentences,
+)
+from .orthography import looks_old
 from .search import local_search, site_search
 from .store import Store
 
@@ -71,16 +80,20 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
         limit = int(args.get("limit", 20))
         expand = bool(args.get("expand_old_orthography", True))
         source = args.get("source", "local")
+        language = str(args.get("language", ""))
         if source == "site":
             hits = site_search(
                 client(), config.profile, query,
                 expand_old_orthography=expand, limit=limit,
             )
         else:
-            hits = local_search(store(), query, limit=limit, expand_old_orthography=expand)
+            hits = local_search(
+                store(), query, limit=limit,
+                expand_old_orthography=expand, language=language,
+            )
         return {
             "vaicājums": query,
-            "izmēģinātie_varianti": expand_query(query) if expand else [query],
+            "izmēģinātie_varianti": expand_query_lv(query) if expand else [query],
             "rezultāti": [h.to_json() for h in hits],
         }
 
@@ -101,9 +114,12 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
             "datums": doc.date,
             "lappuse": doc.page_number,
             "laidiens": doc.issue_id,
+            "valoda": doc.language or doc.metadata.get("valoda", ""),
             "ortogrāfija": doc.orthography,
             "vecuma_novērtējums": doc.old_score,
             "ocr_ticamība": doc.ocr_confidence,
+            "vietvārdi": doc.metadata.get("vietvārdi", []),
+            "datuma_detaļas": doc.metadata.get("datuma_detaļas", {}),
             "saite": doc.viewer_url or doc.url,
             "teksts_oriģinālā": doc.text_raw[:limit],
             "teksts_mūsdienu_rakstībā": doc.text_modern[:limit],
@@ -134,13 +150,42 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
         text = str(args.get("text", ""))
         if not text:
             return {"kļūda": "tukšs teksts"}
-        result = normalize_article_text(text)
+        result = analyze_article(text)
         result["vecuma_novērtējums"] = result.pop("old_score")
+        result.pop("date_details", None)
         return result
 
     def t_expand(args: dict) -> Any:
         query = str(args.get("query", ""))
-        return {"vaicājums": query, "varianti": expand_query(query, max_queries=int(args.get("limit", 12)))}
+        return {
+            "vaicājums": query,
+            "varianti": expand_query_lv(
+                query,
+                inflections=bool(args.get("inflections", True)),
+                old_orthography=bool(args.get("old_orthography", True)),
+                places=bool(args.get("historic_place_names", True)),
+                max_queries=int(args.get("limit", 16)),
+            ),
+        }
+
+    def t_language(args: dict) -> Any:
+        return detect_language(str(args.get("text", "")))
+
+    def t_date(args: dict) -> Any:
+        return parse_latvian_date(str(args.get("text", "")))
+
+    def t_places(args: dict) -> Any:
+        text = str(args.get("text", ""))
+        name = str(args.get("name", ""))
+        out: dict[str, Any] = {}
+        if name:
+            out["vēsturiskie_nosaukumi"] = place_variants(name)
+        if text:
+            out["atrastie_vietvārdi"] = find_places(text)
+        return out or {"kļūda": "jānorāda 'name' vai 'text'"}
+
+    def t_sentences(args: dict) -> Any:
+        return {"teikumi": split_sentences(str(args.get("text", "")))}
 
     def t_crawl(args: dict) -> Any:
         limits = CrawlLimits(
@@ -196,6 +241,8 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
                         "query": {"type": "string", "description": "meklējamais vārds vai frāze"},
                         "source": {"type": "string", "enum": ["local", "site"], "default": "local"},
                         "limit": {"type": "integer", "default": 20},
+                        "language": {"type": "string", "enum": ["", "lv", "de", "ru", "et"],
+                                     "default": "", "description": "filtrs lokālajai meklēšanai"},
                         "expand_old_orthography": {"type": "boolean", "default": True},
                     },
                     "required": ["query"],
@@ -243,8 +290,9 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
             {
                 "description": (
                     "Pārraksta vecās ortogrāfijas / Fraktur OCR tekstu mūsdienu latviešu "
-                    "rakstībā un notīra OCR artefaktus (garais ſ, vārdu pārnesumi, "
-                    "izretinājums). Lieto, kad ielīmēts teksts no attēla vai cita avota."
+                    "rakstībā, notīra OCR artefaktus (garais ſ, vārdu pārnesumi, "
+                    "izretinājums) un ar latviešu vārdnīcas palīdzību izšķir veco 's' "
+                    "(ſirgs -> zirgs). Atgriež arī valodu, datumu un vietvārdus."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -256,12 +304,18 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
         ),
         "periodika_expand_query": (
             {
-                "description": "Parāda, kādos vecās rakstības variantos vārds meklējams.",
+                "description": (
+                    "Parāda visus vaicājuma variantus: locījumus (latviešu valoda ir "
+                    "stipri locīta), vecās ortogrāfijas rakstības un vēsturiskos vietvārdus."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
-                        "limit": {"type": "integer", "default": 12},
+                        "inflections": {"type": "boolean", "default": True},
+                        "old_orthography": {"type": "boolean", "default": True},
+                        "historic_place_names": {"type": "boolean", "default": True},
+                        "limit": {"type": "integer", "default": 16},
                     },
                     "required": ["query"],
                 },
@@ -312,6 +366,67 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
                 },
             },
             t_probe,
+        ),
+        "periodika_detect_language": (
+            {
+                "description": (
+                    "Nosaka raksta valodu (latviešu / vācu / krievu / igauņu). periodika "
+                    "satur arī baltvācu un krievu presi, un latviešu vecās drukas "
+                    "noteikumus nedrīkst laist pāri citas valodas tekstam."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            },
+            t_language,
+        ),
+        "periodika_parse_date": (
+            {
+                "description": (
+                    "Izvelk datumu no latviska teksta: '1899. gada 1. (13.) maijā' -> "
+                    "1899-05-13 (jaunais stils) un 1899-05-01 (vecais stils). Prot arī "
+                    "vecās drukas mēnešu nosaukumus un tautas mēnešus (sērsnu mēnesis)."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            },
+            t_date,
+        ),
+        "periodika_place_names": (
+            {
+                "description": (
+                    "Vēsturiskie vietvārdi: 'Jelgava' -> Mitau / Jelgawa / Митава, un "
+                    "otrādi — atrod tekstā vecos nosaukumus. Bez tā meklēšana baltvācu "
+                    "un krievu presē neatrod neko."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "mūsdienu vietvārds"},
+                        "text": {"type": "string", "description": "teksts, kurā meklēt vietvārdus"},
+                    },
+                },
+            },
+            t_places,
+        ),
+        "periodika_split_sentences": (
+            {
+                "description": (
+                    "Sadala latviešu tekstu teikumos, neapraujot saīsinājumus "
+                    "('1899. g. 1. maijā', 'u.c.', 'lpp.')."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            },
+            t_sentences,
         ),
         "periodika_detect_orthography": (
             {

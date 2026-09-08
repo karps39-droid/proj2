@@ -17,6 +17,7 @@ from .config import SiteProfile
 from .extract import ids_from_url
 from .htmlutil import parse_html
 from .http_client import FetchError, HttpClient
+from .latvian import expand_query_lv
 from .orthography import expand_query, fold
 from .store import Document, Store
 
@@ -55,17 +56,32 @@ def site_search(
     query: str,
     *,
     expand_old_orthography: bool = True,
-    max_variants: int = 6,
+    inflections: bool = True,
+    historic_place_names: bool = True,
+    max_variants: int = 8,
     limit: int = 25,
     page: int = 1,
 ) -> list[SearchHit]:
-    """Meklē dzīvajā vietnē, izmēģinot arī vecās rakstības variantus."""
+    """Meklē dzīvajā vietnē, izmēģinot latviskos vaicājuma variantus.
+
+    Paplašina trijos virzienos: locījumi (latviešu valoda ir stipri locīta),
+    vecā ortogrāfija un vēsturiskie vietvārdi (``Jelgava`` → ``Mitau``).
+    """
     if not profile.search_url_template:
         raise RuntimeError(
             "Profilā nav meklēšanas veidnes. Palaid `periodika probe`, "
             "vai norādi to manuāli konfigurācijā (search_url_template)."
         )
-    queries = expand_query(query, max_queries=max_variants) if expand_old_orthography else [query]
+    if expand_old_orthography or inflections or historic_place_names:
+        queries = expand_query_lv(
+            query,
+            inflections=inflections,
+            old_orthography=expand_old_orthography,
+            places=historic_place_names,
+            max_queries=max_variants,
+        )
+    else:
+        queries = [query]
     hits: list[SearchHit] = []
     seen: set[str] = set()
     for q in queries:
@@ -150,10 +166,21 @@ def _parse_json_hits(payload: str, base_url: str, profile: SiteProfile, matched_
 
 
 def local_search(
-    store: Store, query: str, *, limit: int = 20, expand_old_orthography: bool = True
+    store: Store,
+    query: str,
+    *,
+    limit: int = 20,
+    expand_old_orthography: bool = True,
+    language: str = "",
 ) -> list[SearchHit]:
-    """Meklē jau savāktajā lokālajā indeksā (ātri, bez tīkla)."""
+    """Meklē jau savāktajā lokālajā indeksā (ātri, bez tīkla).
+
+    Indekss glabā arī celmoto tekstu, tāpēc ``sabiedrība`` atrod
+    ``sabiedrībai``, ``sabeedribas`` un ``ſabeedriba``.
+    """
     results = store.search(query, limit=limit, fold_query=expand_old_orthography)
+    if language:
+        results = [(d, s) for d, s in results if d.language == language]
     out: list[SearchHit] = []
     for doc, snippet in results:
         out.append(
@@ -170,6 +197,7 @@ def local_search(
                     "dokumenta_id": doc.id,
                     "ortogrāfija": doc.orthography,
                     "datums": doc.date,
+                    "valoda": doc.language,
                 },
             )
         )

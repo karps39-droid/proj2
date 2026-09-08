@@ -27,8 +27,24 @@ python3 -m unittest discover -s tests    # visiem jābūt zaļiem, aizņem <1 s
   Nekad nepasniedz to kā oriģinālu citātu.
 
 ## Kad meklē
-Vaicājumu vienmēr laid caur `expand_query` (`periodika_search` to dara pats) —
-19. gs. tekstos `sabiedrība` ir uzrakstīta kā `sabeedriba` vai `ſabeedriba`.
+Vaicājumu vienmēr laid caur `expand_query_lv` (`periodika_search` to dara pats) —
+tas sedz trīs lietas vienlaikus:
+- **locījumus** (latviešu valoda ir stipri locīta: `sabiedrība` / `sabiedrībām`),
+- **veco ortogrāfiju** (`sabeedriba`, `ſabeedriba`),
+- **vēsturiskos vietvārdus** (`Jelgava` → `Mitau`, `Митава`).
+
+Meklējot vietu vai iestādi vācu vai krievu presē, sāc ar `periodika_place_names`.
+
+## Valoda pirms normalizācijas
+periodika satur latviešu, vācu un krievu presi. `analyze_article` vispirms
+nosaka valodu un latviešu vecās drukas noteikumus laiž pāri **tikai** latviešu
+tekstam — nemēģini normalizēt vācu rakstu ar `old_to_modern`, tas to sabojās
+(`Wenden` → `Venden`). Ne-latviešu dokumentiem `orthography` ir `cita valoda`.
+
+## Datumi
+`periodika_parse_date` atgriež gan jauno, gan veco stilu. Līdz 1918. gadam
+presē datums parasti ir Jūlija kalendārā — ja raksti par datējumu, saki, kurš
+stils ir domāts (`calendar` lauks to pasaka).
 
 ## Rāpošanas ētika
 Noklusējuma 1 pieprasījums/s un `robots.txt` ievērošana nav dekorācija.

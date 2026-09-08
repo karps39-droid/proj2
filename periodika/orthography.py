@@ -348,20 +348,29 @@ _MODERN_MARKERS = re.compile(r"[āčēģīķļņšūž]")
 
 
 def looks_old(text: str) -> float:
-    """Atgriež 0..1 novērtējumu, cik ticami teksts ir vecajā ortogrāfijā."""
+    """Atgriež 0..1 novērtējumu, cik ticami teksts ir vecajā ortogrāfijā.
+
+    Novērtējums ir vecās un mūsdienu rakstības liecību attiecība, nevis to
+    starpība: tekstā, kas jau daļēji pārrakstīts (vai OCR sajaukts), viena
+    mūsdienu galotne nedrīkst atsvērt visas vecās drukas pazīmes.
+    """
     words = _LETTER_RE.findall(text.lower())
     if not words:
         return 0.0
-    score = 0.0
+    old_weight = 0.0
+    modern_count = 0
     for word in words:
         hit = 0.0
         for pattern, weight in _OLD_MARKERS:
             if pattern.search(word):
                 hit = max(hit, weight)
-        if _MODERN_MARKERS.search(word):
-            hit -= 0.8
-        score += max(hit, 0.0) if hit > 0 else hit
-    return max(0.0, min(1.0, score / len(words) * 2.5))
+        if hit > 0.0:
+            old_weight += hit
+        elif _MODERN_MARKERS.search(word):
+            modern_count += 1
+    if old_weight == 0.0:
+        return 0.0
+    return round(min(1.0, old_weight / (old_weight + modern_count)), 3)
 
 
 def fold(text: str) -> str:

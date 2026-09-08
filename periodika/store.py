@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
 
+from .latvian import stem_text
 from .orthography import fold
 
 __all__ = ["Document", "Store"]
@@ -96,7 +97,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
 _FTS_SCHEMA = """
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-    title, text_raw, text_modern, text_fold,
+    title, text_raw, text_modern, text_fold, text_stem,
     tokenize='unicode61 remove_diacritics 2'
 );
 CREATE TABLE IF NOT EXISTS fts_map (rowid INTEGER PRIMARY KEY, doc_id TEXT UNIQUE);
@@ -114,9 +115,25 @@ class Store:
         self.fts_enabled = True
         try:
             con.executescript(_FTS_SCHEMA)
+            self._migrate_fts(con)
         except sqlite3.OperationalError:
             self.fts_enabled = False
         con.commit()
+
+    def _migrate_fts(self, con: sqlite3.Connection) -> None:
+        """Vecākas krātuves (bez celmu kolonnas) pārbūvē indeksu uz vietas."""
+        columns = {row[1] for row in con.execute("PRAGMA table_info(documents_fts)")}
+        if "text_stem" in columns:
+            return
+        con.executescript(
+            "DROP TABLE IF EXISTS documents_fts; DROP TABLE IF EXISTS fts_map;"
+        )
+        con.executescript(_FTS_SCHEMA)
+        rows = con.execute("SELECT id FROM documents").fetchall()
+        for row in rows:
+            doc = self.get_document(row[0])
+            if doc is not None:
+                self._index_document(con, doc)
 
     # -- savienojumi ----------------------------------------------------
     def _conn(self) -> sqlite3.Connection:
@@ -235,19 +252,21 @@ class Store:
     def _index_document(self, con: sqlite3.Connection, doc: Document) -> None:
         row = con.execute("SELECT rowid FROM fts_map WHERE doc_id=?", (doc.id,)).fetchone()
         text_fold = fold(f"{doc.title}\n{doc.text_raw}")
+        # celmi ļauj atrast "sabiedrība", kad tekstā ir "sabeedribas"
+        text_stem = stem_text(f"{doc.title} {doc.text_modern} {text_fold}")
         if row:
             rowid = row["rowid"]
             con.execute("DELETE FROM documents_fts WHERE rowid=?", (rowid,))
             con.execute(
-                "INSERT INTO documents_fts(rowid, title, text_raw, text_modern, text_fold) "
-                "VALUES (?,?,?,?,?)",
-                (rowid, doc.title, doc.text_raw, doc.text_modern, text_fold),
+                "INSERT INTO documents_fts(rowid, title, text_raw, text_modern, text_fold, "
+                "text_stem) VALUES (?,?,?,?,?,?)",
+                (rowid, doc.title, doc.text_raw, doc.text_modern, text_fold, text_stem),
             )
         else:
             cur = con.execute(
-                "INSERT INTO documents_fts(title, text_raw, text_modern, text_fold) "
-                "VALUES (?,?,?,?)",
-                (doc.title, doc.text_raw, doc.text_modern, text_fold),
+                "INSERT INTO documents_fts(title, text_raw, text_modern, text_fold, text_stem) "
+                "VALUES (?,?,?,?,?)",
+                (doc.title, doc.text_raw, doc.text_modern, text_fold, text_stem),
             )
             con.execute(
                 "INSERT OR REPLACE INTO fts_map(rowid, doc_id) VALUES (?,?)",
@@ -266,6 +285,7 @@ class Store:
         date_from: str = "",
         date_to: str = "",
         kind: str = "",
+        language: str = "",
         limit: int = 50,
         offset: int = 0,
     ) -> list[Document]:
@@ -286,6 +306,9 @@ class Store:
         if kind:
             where.append("kind=?")
             params.append(kind)
+        if language:
+            where.append("language=?")
+            params.append(language)
         sql = "SELECT * FROM documents"
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -313,6 +336,9 @@ class Store:
                 folded = fold(query)
                 if folded and folded != query.lower():
                     terms.append(_fts_escape(folded))
+                stemmed = stem_text(query)
+                if stemmed and stemmed not in (query.lower(), folded):
+                    terms.append(_fts_escape(stemmed))
             match = " OR ".join(terms)
             try:
                 rows = con.execute(
@@ -353,6 +379,12 @@ class Store:
                 "SELECT kind, COUNT(*) AS n FROM documents GROUP BY kind"
             ).fetchall()
         }
+        by_lang = {
+            r["language"] or "?": r["n"]
+            for r in con.execute(
+                "SELECT language, COUNT(*) AS n FROM documents GROUP BY language"
+            ).fetchall()
+        }
         by_orth = {
             r["orthography"]: r["n"]
             for r in con.execute(
@@ -370,6 +402,7 @@ class Store:
             "laidieni": issues,
             "pa_veidiem": by_kind,
             "pa_ortogrāfijām": by_orth,
+            "pa_valodām": by_lang,
             "datumu_diapazons": [span["a"], span["b"]],
             "fronte": self.frontier_counts(),
             "fts": self.fts_enabled,

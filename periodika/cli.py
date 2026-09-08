@@ -7,6 +7,9 @@
     periodika search "sabiedrība"                      # meklē lokālajā indeksā
     periodika get <dokumenta-id> --modern              # nolasa rakstu
     periodika normalize teksts.txt                     # veco rakstību -> mūsdienu
+    periodika lang teksts.txt                          # latviešu / vācu / krievu?
+    periodika date "1899. gada 1. (13.) maijā"         # vecais un jaunais stils
+    periodika places --name Jelgava                    # Mitau, Jelgawa, Митава
     periodika export raksti.jsonl
     periodika mcp                                      # MCP serveris Claude aģentam
 """
@@ -23,13 +26,20 @@ from .config import Config
 from .crawl import CrawlLimits, Crawler
 from .discovery import probe_site
 from .http_client import HttpClient
+from .latvian import (
+    analyze_article,
+    detect_language,
+    expand_query_lv,
+    find_places,
+    normalize_lv,
+    parse_latvian_date,
+    place_variants,
+)
 from .orthography import (
     NormalizeOptions,
     clean_ocr,
-    expand_query,
     looks_old,
     modern_to_old_variants,
-    old_to_modern,
 )
 from .search import local_search, site_search
 from .store import Store
@@ -152,6 +162,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             args.query,
             limit=args.limit,
             expand_old_orthography=not args.no_expand,
+            language=args.lang or "",
         )
     if args.json:
         _print([h.to_json() for h in hits], True)
@@ -217,22 +228,52 @@ def cmd_normalize(args: argparse.Namespace) -> int:
     )
     cleaned = clean_ocr(raw)
     if args.json:
-        _print(
-            {
-                "vecuma_novērtējums": round(looks_old(cleaned), 3),
-                "teksts_tīrīts": cleaned,
-                "teksts_mūsdienu": old_to_modern(cleaned, opts),
-            },
-            True,
-        )
+        analysis = analyze_article(cleaned)
+        analysis["vecuma_novērtējums"] = analysis.pop("old_score")
+        _print(analysis, True)
     else:
-        print(old_to_modern(cleaned, opts))
+        print(normalize_lv(cleaned, use_lexicon=not args.no_lexicon, options=opts))
     return 0
 
 
 def cmd_expand(args: argparse.Namespace) -> int:
-    _print(expand_query(args.query, max_queries=args.limit), args.json)
+    _print(
+        expand_query_lv(
+            args.query,
+            inflections=not args.no_inflections,
+            old_orthography=not args.no_old,
+            places=not args.no_places,
+            max_queries=args.limit,
+        ),
+        args.json,
+    )
     return 0
+
+
+def cmd_lang(args: argparse.Namespace) -> int:
+    text = _read_text(args.path)
+    _print(detect_language(text), True)
+    return 0
+
+
+def cmd_date(args: argparse.Namespace) -> int:
+    text = args.text or _read_text(args.path)
+    _print(parse_latvian_date(text), True)
+    return 0
+
+
+def cmd_places(args: argparse.Namespace) -> int:
+    if args.name:
+        _print({"vēsturiskie_nosaukumi": place_variants(args.name)}, True)
+    else:
+        _print({"atrastie_vietvārdi": find_places(_read_text(args.path))}, True)
+    return 0
+
+
+def _read_text(path: str | None) -> str:
+    if path in ("-", None):
+        return "" if sys.stdin.isatty() else sys.stdin.read()
+    return Path(path).read_text(encoding="utf-8", errors="replace")
 
 
 def cmd_export(args: argparse.Namespace) -> int:
@@ -311,6 +352,8 @@ def build_parser() -> argparse.ArgumentParser:
     ss.add_argument("--site", action="store_true", help="meklēt dzīvajā vietnē")
     ss.add_argument("--no-expand", action="store_true", help="bez vecās drukas variantiem")
     ss.add_argument("--limit", type=int, default=25)
+    ss.add_argument("--lang", choices=["lv", "de", "ru", "et"],
+                    help="filtrē lokālos rezultātus pēc valodas")
     ss.set_defaults(func=cmd_search)
 
     sg = sub.add_parser("get", parents=[common], help="nolasa saglabātu rakstu")
@@ -330,12 +373,31 @@ def build_parser() -> argparse.ArgumentParser:
     sn.add_argument("--no-doubles", action="store_true")
     sn.add_argument("--no-germanisms", action="store_true")
     sn.add_argument("--decapitalize", action="store_true")
+    sn.add_argument("--no-lexicon", action="store_true",
+                    help="neizmantot latviešu vārdnīcu s/z izšķiršanai")
     sn.set_defaults(func=cmd_normalize)
 
     se = sub.add_parser("expand", parents=[common], help="parāda vaicājuma vecās drukas variantus")
     se.add_argument("query")
-    se.add_argument("--limit", type=int, default=12)
+    se.add_argument("--limit", type=int, default=16)
+    se.add_argument("--no-inflections", action="store_true", help="bez locījumiem")
+    se.add_argument("--no-old", action="store_true", help="bez vecās ortogrāfijas")
+    se.add_argument("--no-places", action="store_true", help="bez vēsturiskajiem vietvārdiem")
     se.set_defaults(func=cmd_expand)
+
+    sl = sub.add_parser("lang", parents=[common], help="nosaka teksta valodu")
+    sl.add_argument("path", nargs="?", default="-")
+    sl.set_defaults(func=cmd_lang)
+
+    sd = sub.add_parser("date", parents=[common], help="izvelk datumu (arī veco/jauno stilu)")
+    sd.add_argument("text", nargs="?")
+    sd.add_argument("--path", default="-")
+    sd.set_defaults(func=cmd_date)
+
+    spl = sub.add_parser("places", parents=[common], help="vēsturiskie vietvārdi")
+    spl.add_argument("--name", help="mūsdienu vietvārds -> vēsturiskie varianti")
+    spl.add_argument("path", nargs="?", default="-", help="teksts, kurā meklēt vietvārdus")
+    spl.set_defaults(func=cmd_places)
 
     sx = sub.add_parser("export", parents=[common], help="eksportē krātuvi JSONL formātā")
     sx.add_argument("path")

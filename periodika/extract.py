@@ -17,7 +17,7 @@ from . import alto as alto_mod
 from .config import SiteProfile
 from .htmlutil import parse_html
 from .http_client import FetchError, HttpClient, Response
-from .orthography import normalize_article_text
+from .latvian import analyze_article
 from .store import Document
 
 __all__ = ["identify", "ids_from_url", "documents_from_response", "build_document"]
@@ -119,7 +119,7 @@ def build_document(
     ocr_confidence: float | None = None,
     metadata: dict | None = None,
 ) -> Document:
-    norm = normalize_article_text(text)
+    norm = analyze_article(text)
     viewer_url = ""
     if profile and profile.hash_route_template and issue_id:
         viewer_url = profile.hash_route_template.format(
@@ -128,6 +128,9 @@ def build_document(
             article=article_id or "",
             n=page_number or 1,
         )
+    language = language or str(norm["language"])
+    if not date and norm.get("date"):
+        date = str(norm["date"])
     return Document(
         id=_doc_id(url, issue_id, article_id, str(page_number or ""), title[:60]),
         kind=kind,
@@ -146,7 +149,13 @@ def build_document(
         old_score=float(norm["old_score"]),  # type: ignore[arg-type]
         ocr_confidence=ocr_confidence,
         source_type=source_type,
-        metadata=metadata or {},
+        metadata={
+            **(metadata or {}),
+            "valoda": norm["language_name"],
+            "valodas_ticamība": norm["language_confidence"],
+            **({"vietvārdi": norm["places"]} if norm["places"] else {}),
+            **({"datuma_detaļas": norm["date_details"]} if norm.get("date_details") else {}),
+        },
     )
 
 
