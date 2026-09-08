@@ -39,6 +39,7 @@ from .latvian import (
 )
 from .browser import BrowserUnavailable, browser_available, discover_endpoints, read_page
 from .correct import correct_text, suspicious_words
+from .netcheck import diagnose
 from .orthography import looks_old
 from .recognize import RecognitionError, available_engines, recognize
 from .search import local_search, site_search
@@ -223,6 +224,16 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
 
     def t_engines(args: dict) -> Any:
         return {**available_engines(), "pārlūks": browser_available()}
+
+    def t_netcheck(args: dict) -> Any:
+        return diagnose(
+            str(args.get("url") or config.profile.base_url),
+            user_agent=config.policy.effective_user_agent(),
+            ca_bundle=config.policy.ca_bundle,
+            proxy=config.policy.proxy,
+            check_browser=bool(args.get("check_browser", True)),
+            timeout=config.policy.timeout,
+        ).to_json()
 
     def t_browse(args: dict) -> Any:
         url = str(args.get("url", "")).strip()
@@ -504,6 +515,24 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
                 "inputSchema": {"type": "object", "properties": {}},
             },
             t_engines,
+        ),
+        "periodika_netcheck": (
+            {
+                "description": (
+                    "Kad kaut kas 'nestrādā' vai vietne šķiet bloķēta — izsauc šo. "
+                    "Pārbauda pa slāņiem (DNS, TCP, starpniekserveris, TLS, HTTP, "
+                    "robots.txt, pārlūks) un pasaka, kurš krīt un ko darīt. Izšķir "
+                    "organizācijas izejas politiku no vietnes atteikuma klientam."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "noklusējums: profila bāze"},
+                        "check_browser": {"type": "boolean", "default": True},
+                    },
+                },
+            },
+            t_netcheck,
         ),
         "periodika_browse_page": (
             {

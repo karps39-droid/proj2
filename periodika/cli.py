@@ -14,6 +14,7 @@
     periodika engines                                  # kas šajā vidē pieejams
     periodika correct ocr.txt --handwriting            # atpazīšanas kļūdu labošana
     periodika export raksti.jsonl
+    periodika netcheck                                 # kas tieši bloķē?
     periodika browse "<skatītāja saite>"               # ieiet lapā un nolasīt (SPA)
     periodika sniff "<skatītāja saite>" --save-profile  # atrast datu galapunktus
     periodika doctor                                   # vai viss strādā uz šī datora?
@@ -51,6 +52,7 @@ from .orthography import (
 from .browser import BrowserUnavailable, browser_available, discover_endpoints, read_page
 from .correct import correct_text, suspicious_words
 from .doctor import format_report, run_diagnostics, self_test
+from .netcheck import diagnose
 from .setup_mcp import claude_cli_command, config_targets, install_into
 from .recognize import RecognitionError, available_engines, recognize
 from .search import local_search, site_search
@@ -74,6 +76,12 @@ def _build_config(args: argparse.Namespace) -> Config:
         cfg.policy.contact = args.contact
     if args.ignore_robots:
         cfg.policy.obey_robots = False
+    if args.proxy:
+        cfg.policy.proxy = args.proxy
+    if args.ca_bundle:
+        cfg.policy.ca_bundle = args.ca_bundle
+    if args.via_browser:
+        cfg.policy.via_browser = args.via_browser
     return cfg
 
 
@@ -111,6 +119,7 @@ def cmd_crawl(args: argparse.Namespace) -> int:
     crawler = Crawler(
         cfg, store=store, on_event=_progress(args.quiet),
         render=args.render, render_save_data_to=args.render_save_data,
+        via_browser=cfg.policy.via_browser,
     )
     if not args.resume:
         added = crawler.seed(args.seed or ())
@@ -351,6 +360,24 @@ def cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_netcheck(args: argparse.Namespace) -> int:
+    """Noskaidro, kurš slānis bloķē: tīkls, starpniekserveris, TLS vai pati vietne."""
+    cfg = _build_config(args)
+    result = diagnose(
+        args.url or cfg.profile.base_url,
+        user_agent=cfg.policy.effective_user_agent(),
+        ca_bundle=cfg.policy.ca_bundle,
+        proxy=cfg.policy.proxy,
+        check_browser=not args.no_browser,
+        timeout=cfg.policy.timeout,
+    )
+    if args.json:
+        _print(result.to_json(), True)
+    else:
+        print(result.as_text())
+    return 0 if not any(l.ok is False for l in result.layers) else 1
+
+
 def cmd_browse(args: argparse.Namespace) -> int:
     """Atver lapu īstā pārlūkā un nolasa uzzīmēto saturu."""
     cfg = _build_config(args)
@@ -463,6 +490,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="paralēlo darbinieku skaits")
     common.add_argument("--contact", default=SUPPRESS,
                         help="kontaktinformācija User-Agent rindā (pieklājīgi)")
+    common.add_argument("--proxy", default=SUPPRESS,
+                        help="korporatīvais starpniekserveris, piem. http://serveris:3128")
+    common.add_argument("--ca-bundle", default=SUPPRESS,
+                        help="sertifikātu fails, ja starpniekserveris pārtver TLS")
+    common.add_argument("--via-browser", default=SUPPRESS,
+                        choices=["nekad", "atkāpjoties", "vienmēr"],
+                        help="pieprasījumus izdarīt caur īstu pārlūku, kad vietne atsaka")
     common.add_argument("--ignore-robots", action="store_true", default=SUPPRESS,
                         help="neievērot robots.txt (izmanto tikai ar atļauju)")
     common.add_argument("--json", action="store_true", default=SUPPRESS,
@@ -590,6 +624,12 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("stats", parents=[common], help="krātuves un frontes statistika")
     st.set_defaults(func=cmd_stats)
 
+    snc = sub.add_parser("netcheck", parents=[common],
+                         help="kurš slānis bloķē: tīkls, starpnieks, TLS vai vietne?")
+    snc.add_argument("url", nargs="?", help="pārbaudāmais URL (noklusējums: profila bāze)")
+    snc.add_argument("--no-browser", action="store_true", help="neizmēģināt pārlūku")
+    snc.set_defaults(func=cmd_netcheck)
+
     sb = sub.add_parser("browse", parents=[common],
                         help="atver lapu pārlūkā un nolasa uzzīmēto saturu (SPA)")
     sb.add_argument("url")
@@ -630,6 +670,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 GLOBAL_DEFAULTS = {
+    "proxy": None,
+    "ca_bundle": None,
+    "via_browser": None,
     "config": None,
     "data_dir": None,
     "base": None,

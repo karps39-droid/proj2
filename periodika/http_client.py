@@ -19,6 +19,7 @@ import io
 import random
 import re
 import sqlite3
+import ssl
 import threading
 import time
 import urllib.error
@@ -28,7 +29,7 @@ import urllib.robotparser
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Callable, Iterable
 
 from .config import CrawlPolicy
 
@@ -219,11 +220,28 @@ class HttpClient:
 
     def __post_init__(self) -> None:
         self._cache = _Cache(self.cache_path) if self.cache_path else None
-        self._opener = urllib.request.build_opener(
+        handlers: list[Any] = [
             urllib.request.HTTPRedirectHandler(),
             urllib.request.HTTPCookieProcessor(),
-        )
-        self.stats = {"requests": 0, "cache_hits": 0, "not_modified": 0, "errors": 0}
+        ]
+        if self.policy.proxy:
+            handlers.append(
+                urllib.request.ProxyHandler(
+                    {"http": self.policy.proxy, "https": self.policy.proxy}
+                )
+            )
+        if self.policy.ca_bundle:
+            # Korporatīvs starpniekserveris pārtver TLS: uzticamies tā sertifikātam,
+            # bet pārbaudi neizslēdzam nekad.
+            context = ssl.create_default_context(cafile=self.policy.ca_bundle)
+            handlers.append(urllib.request.HTTPSHandler(context=context))
+        self._opener = urllib.request.build_opener(*handlers)
+        #: Rezerves transports (pārlūks), ko lieto, kad vietne atsaka klientam.
+        self.fallback_transport: Callable[[str], "Response | None"] | None = None
+        self.stats = {
+            "requests": 0, "cache_hits": 0, "not_modified": 0,
+            "errors": 0, "browser_fallbacks": 0,
+        }
 
     # -- robots ---------------------------------------------------------
     def _robots_for(self, url: str) -> urllib.robotparser.RobotFileParser | None:
@@ -356,6 +374,11 @@ class HttpClient:
             if last_mod:
                 extra["If-Modified-Since"] = last_mod
 
+        if self.policy.via_browser == "vienmēr" and self.fallback_transport is not None:
+            rescued = self._try_browser(url)
+            if rescued is not None:
+                return rescued
+
         limiter, crawl_delay = self._limiter(url)
         delay = 0.0
         last_exc: Exception | None = None
@@ -375,6 +398,10 @@ class HttpClient:
                     self.stats["not_modified"] += 1
                     self._cache.touch(url)  # type: ignore[union-attr]
                     return cached[0]
+                if status in (403, 401) and self.fallback_transport is not None:
+                    rescued = self._try_browser(url)
+                    if rescued is not None:
+                        return rescued
                 if status in (408, 425, 429, 500, 502, 503, 504):
                     last_exc = exc
                     delay = self._retry_delay(exc.headers, attempt)
@@ -387,6 +414,25 @@ class HttpClient:
                 continue
         self.stats["errors"] += 1
         raise FetchError(url, f"neizdevās pēc {self.policy.max_retries} atkārtojumiem: {last_exc}")
+
+    def _try_browser(self, url: str) -> "Response | None":
+        """Vietne atteica šim klientam — mēģinām caur īstu pārlūku.
+
+        Tas nav aizsardzības apiešana: pieprasījums iet caur to pašu pārlūku, ko
+        lietotājs lietotu pats, ar tām pašām sīkdatnēm, un robots.txt un ātruma
+        ierobežojums paliek spēkā.
+        """
+        if self.fallback_transport is None:
+            return None
+        try:
+            resp = self.fallback_transport(url)
+        except Exception:  # noqa: BLE001 - rezerves ceļš nedrīkst apturēt visu
+            return None
+        if resp is not None:
+            self.stats["browser_fallbacks"] += 1
+            if self._cache and resp.status == 200:
+                self._cache.put(resp)
+        return resp
 
     def _retry_delay(self, headers, attempt: int) -> float:
         if headers is not None:

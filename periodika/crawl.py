@@ -139,6 +139,7 @@ class Crawler:
         on_event: Callable[[str, dict], None] | None = None,
         render: bool = False,
         render_save_data_to: str | None = None,
+        via_browser: str = "",
     ) -> None:
         self.config = config
         self.profile = config.profile
@@ -158,6 +159,19 @@ class Crawler:
             if self.render
             else None
         )
+        #: Kad vietne atsaka klientam, pieprasījumu var izdarīt caur īstu pārlūku.
+        self.via_browser = via_browser or self.config.policy.via_browser
+        self._transport = None
+        if self.via_browser in ("atkāpjoties", "vienmēr"):
+            from .browser import BrowserTransport
+
+            self.config.policy.via_browser = self.via_browser
+            self._transport = BrowserTransport(
+                warm_up_url=self.profile.base_url,
+                timeout=self.config.policy.timeout,
+                user_agent="",
+            )
+            self.client.fallback_transport = self._transport.fetch
 
     # -- URL politika ---------------------------------------------------
     def in_scope(self, url: str) -> bool:
@@ -292,6 +306,8 @@ class Crawler:
                         break
         if self._renderer is not None:
             self._renderer.close()
+        if self._transport is not None:
+            self._transport.close()
         self.store.set_meta("last_crawl", str(time.time()))
         return result
 

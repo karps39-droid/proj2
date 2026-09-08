@@ -12,6 +12,7 @@ Trīs daļas:
 | **Nolasītājs** | METS + ALTO (un TEI) parsēšana: no OCR blokiem uz veseliem rakstiem ar virsrakstu, datumu, lappusi un OCR ticamību. |
 | **Vecā druka** | Fraktur OCR tīrīšana, vecās ortogrāfijas pārrakstīšana mūsdienu rakstībā un vaicājumu paplašināšana pretējā virzienā. |
 | **Latviešu valoda** | Celmošana un locīšana, vārdnīca vecā `s`/`z` izšķiršanai, valodas noteikšana, latviskie datumi ar veco/jauno stilu, vēsturiskie vietvārdi. |
+| **Bloķēšana** | Slāņu diagnostika (DNS → starpnieks → TLS → HTTP → robots), starpniekservera un sertifikātu atbalsts, pieprasījumi caur īstu pārlūku. |
 | **Ieiešana lapā** | Headless Chromium atver SPA skatītāju, nolasa uzzīmēto tekstu un pieraksta, no kurienes lietotne ņem datus. |
 | **Attēli un rokraksts** | Skenējuma sagatavošana, rindu sagriešana, OCR/HTR dzinēju adapteri, PAGE XML/hOCR ievade un Fraktur/Kurrent kļūdu labošana pēc vārdnīcas. |
 
@@ -147,6 +148,7 @@ Pieejamie rīki:
 | `periodika_read_image` | Nolasa skenējumu — druku vai rokrakstu. |
 | `periodika_correct_text` | Labo Fraktur/Kurrent atpazīšanas kļūdas pēc vārdnīcas. |
 | `periodika_recognition_engines` | Kuri atpazīšanas dzinēji šajā vidē pieejami. |
+| `periodika_netcheck` | Kurš slānis bloķē un ko ar to darīt. |
 | `periodika_browse_page` | Atver lapu īstā pārlūkā un nolasa uzzīmēto saturu. |
 | `periodika_discover_endpoints` | Noskaidro lietotnes datu galapunktus un uzraksta profilu. |
 | `periodika_probe` | Noskaidro vietnes galapunktus un saglabā profilu. |
@@ -280,6 +282,52 @@ pareizi būtu `avīzes`), un dubultie līdzskaņi ne vienmēr ir artefakts. Tāp
 `text_modern` ir **minējums lasīšanai un meklēšanai**, nevis autoritatīva
 transkripcija. Zinātniskam citātam lieto `text_raw` un saiti uz skenējumu
 (`viewer_url`).
+
+---
+
+## Kad vietne šķiet bloķēta
+
+"Nestrādā" nozīmē sešas dažādas lietas, un katrai ir cits risinājums. `netcheck`
+tās izšķir pa slāņiem un katram atradumam pieliek konkrētu darbību:
+
+```bash
+periodika netcheck
+```
+
+```
+  [✓] DNS: periodika.lndb.lv -> 5.45.44.29
+  [✗] Starpniekserveris: CONNECT periodika.lndb.lv:443 -> HTTP/1.1 403 Forbidden
+        -> organizācijas politikas lēmums, ne kļūda: vajag atļauju vai citu tīklu
+```
+
+| Kas krīt | Ko tas nozīmē | Risinājums |
+|---|---|---|
+| DNS | Vārds neatrisinās | Tīkla vai korporatīvā DNS ierobežojums |
+| TCP | Savienojums netiek izveidots | `--proxy http://serveris:3128` |
+| Starpniekserveris (403/407) | **Organizācijas izejas politika** | Atļauja no administratora vai cits tīkls. To neapiet |
+| TLS | Sertifikāts netiek atzīts | `--ca-bundle /ceļš/uz/ca.crt` (TLS pārtveršana). Pārbaudi nekad neizslēdz |
+| HTTP 403 | Atteikts **klientam**, ne tīklam | `--contact` ar īstu e-pastu, `--rate 0.5`, `--via-browser` |
+| HTTP 429 | Par ātru | `--rate 0.5 --workers 1`; `Retry-After` tiek ievērots |
+| robots.txt | Vietnes noteikums | Cits ceļš pie tiem pašiem datiem vai saruna ar bibliotēku |
+
+Ja pārlūks lapu atver, bet vienkāršs pieprasījums nē, diagnostika to pasaka
+tieši: bloķē nevis tīkls, bet vietnes pārbaude klientam.
+
+### Pieprasījumi caur īstu pārlūku
+
+```bash
+periodika crawl --via-browser atkāpjoties    # pārlūku lieto tikai pēc 403
+periodika crawl --via-browser vienmēr        # viss caur pārlūku (lēnāk)
+```
+
+Pieprasījums iet caur to pašu pārlūku, ko lietotu tu pats, ar tā sīkdatnēm un
+sesiju — tas atrisina User-Agent pārbaudes, sīkdatņu sienas un JavaScript
+pārbaudes. `robots.txt` un ātruma ierobežojums paliek spēkā arī šajā režīmā.
+
+Tas **nav** aizsardzības apiešana: nekādu CAPTCHA risināšanu, IP maiņas vai
+identitātes slēpšanas te nav, un to nav vērts pievienot. Ja vietne piekļuvi
+liegusi apzināti vai starpniekserveris ir organizācijas lēmums, tas ir jāciena —
+tad risinājums ir saruna, nevis kods.
 
 ---
 
@@ -439,14 +487,15 @@ periodika/
   latvian.py      celmošana, locīšana, leksikons, valodas noteikšana,
                   datumi (vecais/jaunais stils), vēsturiskie vietvārdi
   data/lv_wordlist.txt  latviešu vārdu saraksts s/z izšķiršanai
-  browser.py      headless Chromium: SPA nolasīšana un datu galapunktu atklāšana
+  browser.py      headless Chromium: SPA nolasīšana, datu galapunkti, transports
+  netcheck.py     kurš slānis bloķē: DNS / starpnieks / TLS / HTTP / robots
   images.py       skenējuma sagatavošana un rindu sagriešana (Pillow, neobligāts)
   recognize.py    OCR/HTR dzinēju adapteri + transkripcijas uzvedne
   correct.py      Fraktur/Kurrent kļūdu labošana pēc vārdnīcas
   pagexml.py      PAGE XML un hOCR (HTR dzinēju izvade)
   cli.py          komandrinda
   mcp_server.py   MCP rīki Claude aģentam
-tests/            177 testi; tīkla vietā vietējs sintētisks skatītājs
+tests/            190 testi; tīkla vietā vietēji serveri, kas atdarina blokus
 ```
 
 ## Testi

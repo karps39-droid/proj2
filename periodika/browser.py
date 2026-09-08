@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from typing import Any, Iterable, Sequence
 
 __all__ = [
     "BrowserUnavailable",
+    "BrowserTransport",
     "BrowserReader",
     "PageRead",
     "browser_available",
@@ -383,6 +385,86 @@ def _save_bodies(bodies: dict[str, bytes], out_dir: Path) -> dict[str, str]:
         target.write_bytes(body)
         saved[url] = str(target)
     return saved
+
+
+# ------------------------------------------------------- pārlūka transports
+class BrowserTransport:
+    """HTTP pieprasījumi caur īstu pārlūku.
+
+    Kad vietne atsaka vienkāršam klientam (User-Agent pārbaude, sīkdatņu siena,
+    JavaScript pārbaude), bet lietotāja pārlūkā tā pati lapa atveras, tad
+    problēma nav tīklā. Šis transports izdara pieprasījumu ar to pašu pārlūku un
+    tā sīkdatnēm, tāpēc atbilde ir tāda pati kā lietotājam.
+
+    Tā nav aizsardzības apiešana: robots.txt un ātruma ierobežojums paliek
+    ``HttpClient`` pusē, un nekādi CAPTCHA vai IP maiņas paņēmieni šeit nav.
+    Ja vietne ir apzināti liegusi piekļuvi, tas ir jārespektē.
+    """
+
+    def __init__(
+        self,
+        *,
+        warm_up_url: str = "",
+        timeout: float = 45.0,
+        user_agent: str = "",
+        headless: bool = True,
+    ) -> None:
+        self.warm_up_url = warm_up_url
+        self.timeout = timeout
+        self.user_agent = user_agent
+        self.headless = headless
+        self._local = threading.local()
+        self._readers: list[BrowserReader] = []
+        self._lock = threading.Lock()
+
+    def _reader(self) -> "BrowserReader":
+        reader = getattr(self._local, "reader", None)
+        if reader is None:
+            reader = BrowserReader(
+                headless=self.headless, timeout=self.timeout, user_agent=self.user_agent
+            ).__enter__()
+            self._local.reader = reader
+            with self._lock:
+                self._readers.append(reader)
+            if self.warm_up_url:
+                # Sīkdatņu siena: vispirms atveram sākumlapu, lai iegūtu sesiju.
+                try:
+                    reader.read(self.warm_up_url, scroll=False, settle_ms=300, max_settle=3)
+                except Exception:  # noqa: BLE001
+                    pass
+        return reader
+
+    def fetch(self, url: str):
+        """Atgriež ``http_client.Response`` vai ``None``, ja neizdevās."""
+        from .http_client import Response  # lokāls imports, lai izvairītos no cikla
+
+        reader = self._reader()
+        context = reader._context
+        if context is None:
+            return None
+        api = context.request.get(url, timeout=self.timeout * 1000)
+        headers = {k.lower(): v for k, v in api.headers.items()}
+        body = api.body()
+        if not (200 <= api.status < 300):
+            return None
+        return Response(url=api.url, status=api.status, headers=headers, body=body)
+
+    __call__ = fetch
+
+    def close(self) -> None:
+        with self._lock:
+            readers, self._readers = self._readers, []
+        for reader in readers:
+            try:
+                reader.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "BrowserTransport":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
 
 
 # --------------------------------------------------- URL veidņu uzģenerēšana

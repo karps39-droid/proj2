@@ -67,6 +67,12 @@ class CrawlPolicy:
     backoff_base: float = 2.0
     backoff_cap: float = 60.0
     obey_robots: bool = True
+    #: Korporatīvais starpniekserveris (vai HTTPS_PROXY vides mainīgais).
+    proxy: str = ""
+    #: Sertifikātu fails, ja starpniekserveris pārtver TLS.
+    ca_bundle: str = ""
+    #: "nekad" | "atkāpjoties" (tikai pēc 403/429) | "vienmēr" — sk. browser.py.
+    via_browser: str = "nekad"
     #: Maksimālais lejupielādējamā resursa izmērs baitos (0 = bez ierobežojuma).
     max_bytes: int = 64 * 1024 * 1024
     #: Cik ilgi (sekundēs) HTTP kešs uzskata atbildi par svaigu bez revalidācijas.

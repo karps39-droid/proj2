@@ -50,6 +50,16 @@ tekstam — nemēģini normalizēt vācu rakstu ar `old_to_modern`, tas to saboj
 presē datums parasti ir Jūlija kalendārā — ja raksti par datējumu, saki, kurš
 stils ir domāts (`calendar` lauks to pasaka).
 
+## Kad kaut kas ir "bloķēts"
+Nekad nemini un neapej. Palaid `periodika_netcheck` — tas pasaka, kurš slānis
+krīt. Trīs atšķirīgas lietas, ko nedrīkst jaukt:
+- **Starpniekservera 403/407** = organizācijas izejas politika. To neapiet:
+  vajag administratora atļauju vai citu tīklu. Ziņo lietotājam.
+- **Vietnes 403** = atteikts klientam. Palīdz godīgs `--contact`, lēnāks ātrums
+  vai `--via-browser` (pieprasījums caur īstu pārlūku ar sīkdatnēm).
+- **robots.txt aizliegums** = vietnes noteikums. Meklē citu ceļu pie tiem pašiem
+  datiem; `--ignore-robots` tikai ar lietotāja skaidru atļauju.
+
 ## Kad lapa neko neatdod
 periodika2-viewer ir SPA — teksta HTML avotā nav. Secība:
 1. `periodika_browse_page` — atver lapu īstā pārlūkā un nolasa uzzīmēto.

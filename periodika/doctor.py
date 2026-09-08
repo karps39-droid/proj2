@@ -265,8 +265,9 @@ def run_diagnostics(config=None, *, check_network: bool = True) -> Report:
 
         _check(
             report, "Savienojums ar vietni", reach,
-            hint=("Pārbaudi internetu un starpniekserveri (HTTPS_PROXY). "
-                  "Bez tīkla strādā tikai lokālais indekss un attēlu/teksta rīki."),
+            hint=("Palaid `periodika netcheck` — tas pasaka, kurš slānis bloķē "
+                  "(tīkls, starpniekserveris, TLS vai pati vietne) un ko darīt. "
+                  "Bez tīkla strādā lokālais indekss un attēlu/teksta rīki."),
         )
     return report
 
