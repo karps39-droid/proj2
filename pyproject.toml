@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "periodika-agent"
+version = "0.1.0"
+description = "periodika.lndb.lv pārmeklēšana un vecās ortogrāfijas rakstu nolasīšana Claude aģentam"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+# Nav obligāti: headless renderēšana SPA lapām, ja probe konstatē, ka bez tā neiztikt.
+render = ["playwright>=1.40"]
+
+[project.scripts]
+periodika = "periodika.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["periodika*"]
+
+[tool.setuptools.package-data]
+periodika = ["py.typed"]

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alto xmlns="http://www.loc.gov/standards/alto/ns-v3#">
+  <Description>
+    <sourceImageInformation><fileName>0001.jp2</fileName></sourceImageInformation>
+    <Processing><processingSoftware><softwareName>ABBYY</softwareName></processingSoftware></Processing>
+  </Description>
+  <Layout>
+    <Page ID="PAGE1" PHYSICAL_IMG_NR="1" WIDTH="4000" HEIGHT="6000">
+      <PrintSpace HPOS="0" VPOS="0" WIDTH="4000" HEIGHT="6000">
+        <ComposedBlock ID="CB1" TYPE="article">
+          <TextBlock ID="P1_TB00001" HPOS="100" VPOS="200" WIDTH="900" HEIGHT="400">
+            <TextLine ID="P1_TL00001" HPOS="100" VPOS="200">
+              <String CONTENT="Rihgas" WC="0.94" HPOS="100" VPOS="200" WIDTH="200" HEIGHT="40"/>
+              <SP/>
+              <String CONTENT="Latweeschu" WC="0.90" HPOS="320" VPOS="200" WIDTH="300" HEIGHT="40"/>
+            </TextLine>
+            <TextLine ID="P1_TL00002" HPOS="100" VPOS="250">
+              <String CONTENT="Beed-" SUBS_TYPE="HypPart1" SUBS_CONTENT="Beedriba" WC="0.88"/>
+              <String CONTENT="riba" SUBS_TYPE="HypPart2" SUBS_CONTENT="Beedriba" WC="0.88"/>
+              <SP/>
+              <String CONTENT="ſchodeen" WC="0.71"/>
+            </TextLine>
+          </TextBlock>
+          <TextBlock ID="P1_TB00002" HPOS="100" VPOS="700" WIDTH="900" HEIGHT="300">
+            <TextLine ID="P1_TL00003" HPOS="100" VPOS="700">
+              <String CONTENT="ſapulzejahs" WC="0.66"/>
+              <SP/>
+              <String CONTENT="pee" WC="0.95"/>
+              <SP/>
+              <String CONTENT="jaunahm" WC="0.80"/>
+              <SP/>
+              <String CONTENT="mahjahm." WC="0.85"/>
+            </TextLine>
+          </TextBlock>
+        </ComposedBlock>
+        <TextBlock ID="P1_TB00003" HPOS="1100" VPOS="200" WIDTH="900" HEIGHT="200">
+          <TextLine ID="P1_TL00004" HPOS="1100" VPOS="200">
+            <String CONTENT="Sludinajumi" WC="0.92"/>
+          </TextLine>
+        </TextBlock>
+      </PrintSpace>
+    </Page>
+  </Layout>
+</alto>

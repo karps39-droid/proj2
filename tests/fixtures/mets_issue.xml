@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mets:mets xmlns:mets="http://www.loc.gov/METS/"
+           xmlns:mods="http://www.loc.gov/mods/v3"
+           xmlns:xlink="http://www.w3.org/1999/xlink">
+  <mets:dmdSec ID="MODSMD_ISSUE">
+    <mets:mdWrap MDTYPE="MODS">
+      <mets:xmlData>
+        <mods:mods>
+          <mods:titleInfo><mods:title>Baltijas Wehſtneſis</mods:title></mods:titleInfo>
+          <mods:originInfo><mods:dateIssued>1899-05-01</mods:dateIssued></mods:originInfo>
+          <mods:language><mods:languageTerm>lav</mods:languageTerm></mods:language>
+        </mods:mods>
+      </mets:xmlData>
+    </mets:mdWrap>
+  </mets:dmdSec>
+  <mets:fileSec>
+    <mets:fileGrp USE="ALTO">
+      <mets:file ID="ALTO_0001" MIMETYPE="text/xml">
+        <mets:FLocat LOCTYPE="URL" xlink:href="alto/0001.xml"/>
+      </mets:file>
+    </mets:fileGrp>
+    <mets:fileGrp USE="IMG">
+      <mets:file ID="IMG_0001" MIMETYPE="image/jp2">
+        <mets:FLocat LOCTYPE="URL" xlink:href="img/0001.jp2"/>
+      </mets:file>
+    </mets:fileGrp>
+  </mets:fileSec>
+  <mets:structMap TYPE="LOGICAL">
+    <mets:div ID="DIVL1" TYPE="NEWSPAPER" LABEL="Baltijas Wehſtneſis">
+      <mets:div ID="DIVL2" TYPE="ARTICLE" LABEL="Rihgas Latweeschu Beedriba" DMDID="MODSMD_ARTICLE1">
+        <mets:fptr>
+          <mets:area FILEID="ALTO_0001" BEGIN="P1_TB00001" END="P1_TB00002" BETYPE="IDREF"/>
+        </mets:fptr>
+      </mets:div>
+      <mets:div ID="DIVL3" TYPE="ADVERTISEMENT" LABEL="Sludinajumi">
+        <mets:fptr>
+          <mets:area FILEID="ALTO_0001" BEGIN="P1_TB00003" END="P1_TB00003" BETYPE="IDREF"/>
+        </mets:fptr>
+      </mets:div>
+    </mets:div>
+  </mets:structMap>
+  <mets:structMap TYPE="PHYSICAL">
+    <mets:div ID="PHYS" TYPE="issue">
+      <mets:div ID="PHYS_0001" TYPE="page" ORDER="1">
+        <mets:fptr FILEID="ALTO_0001"/>
+        <mets:fptr FILEID="IMG_0001"/>
+      </mets:div>
+    </mets:div>
+  </mets:structMap>
+</mets:mets>

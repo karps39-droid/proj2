@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt><title>Mahjas Weesis</title></titleStmt>
+      <publicationStmt><date>1885-03-12</date></publicationStmt>
+    </fileDesc>
+  </teiHeader>
+  <text><body>
+    <div xml:id="DIVL75" type="article">
+      <head>Weſtis no Widſemes</head>
+      <p>Pirmā rindkopa ar wezo rakſtibu.</p>
+      <p>Otrā rindkopa.</p>
+    </div>
+    <div xml:id="DIVL76" type="advertisement">
+      <head>Sludinajumi</head>
+      <p>Pahrdod mahju Rihgā.</p>
+    </div>
+  </body></text>
+</TEI>
