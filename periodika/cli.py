@@ -14,6 +14,8 @@
     periodika engines                                  # kas šajā vidē pieejams
     periodika correct ocr.txt --handwriting            # atpazīšanas kļūdu labošana
     periodika export raksti.jsonl
+    periodika doctor                                   # vai viss strādā uz šī datora?
+    periodika mcp-install --target claude-code-lietotāja --write
     periodika mcp                                      # MCP serveris Claude aģentam
 """
 
@@ -45,6 +47,8 @@ from .orthography import (
     modern_to_old_variants,
 )
 from .correct import correct_text, suspicious_words
+from .doctor import format_report, run_diagnostics, self_test
+from .setup_mcp import claude_cli_command, config_targets, install_into
 from .recognize import RecognitionError, available_engines, recognize
 from .search import local_search, site_search
 from .store import Store
@@ -341,6 +345,43 @@ def cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    cfg = _build_config(args)
+    env = run_diagnostics(cfg, check_network=not args.offline)
+    tests = None if args.no_self_test else self_test()
+    if args.json:
+        _print({"vide": env.to_json(),
+                "pašpārbaude": tests.to_json() if tests else None}, True)
+    else:
+        print(format_report(env, tests))
+    critical = env.critical_failures + (tests.critical_failures if tests else [])
+    return 1 if critical else 0
+
+
+def cmd_mcp_install(args: argparse.Namespace) -> int:
+    targets = config_targets()
+    if args.print_only or not args.target:
+        _print(
+            {
+                "claude_code_komanda": claude_cli_command(
+                    data_dir=args.data_dir, wordlist=args.wordlist
+                ),
+                "konfigurācijas_faili": {k: str(v) for k, v in targets.items()},
+                "ieraksts": install_into(
+                    targets["claude-code-projekta"], write=False,
+                    data_dir=args.data_dir, wordlist=args.wordlist,
+                )["ieraksts"],
+                "norāde": "Izvēlies mērķi ar --target (piem. --target claude-desktop --write).",
+            },
+            True,
+        )
+        return 0
+    path = targets.get(args.target, Path(args.target).expanduser())
+    result = install_into(path, write=args.write, data_dir=args.data_dir, wordlist=args.wordlist)
+    _print(result, True)
+    return 1 if result.get("kļūda") else 0
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     from .mcp_server import serve
 
@@ -486,6 +527,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = sub.add_parser("stats", parents=[common], help="krātuves un frontes statistika")
     st.set_defaults(func=cmd_stats)
+
+    sdoc = sub.add_parser("doctor", parents=[common],
+                          help="pārbauda, vai viss strādā uz šī datora")
+    sdoc.add_argument("--offline", action="store_true", help="izlaist tīkla pārbaudi")
+    sdoc.add_argument("--no-self-test", action="store_true")
+    sdoc.set_defaults(func=cmd_doctor)
+
+    smi = sub.add_parser("mcp-install", parents=[common],
+                         help="pieslēdz rīku Claude uz šī datora")
+    smi.add_argument("--target", help="claude-code-lietotāja | claude-code-projekta | "
+                                      "claude-desktop | ceļš uz JSON failu")
+    smi.add_argument("--write", action="store_true", help="tiešām ierakstīt failā (ar dublējumu)")
+    smi.add_argument("--print-only", action="store_true", help="tikai parādīt, ko darīt")
+    smi.add_argument("--wordlist", help="lielāks latviešu vārdu saraksts")
+    smi.set_defaults(func=cmd_mcp_install)
 
     sm = sub.add_parser("mcp", parents=[common], help="palaiž MCP serveri (stdio) Claude aģentam")
     sm.set_defaults(func=cmd_mcp)

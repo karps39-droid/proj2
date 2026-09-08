@@ -7,7 +7,7 @@ name = "periodika-agent"
 version = "0.1.0"
 description = "periodika.lndb.lv pārmeklēšana un vecās ortogrāfijas rakstu nolasīšana Claude aģentam"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = []
 

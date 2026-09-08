@@ -8,7 +8,11 @@ vajadzības (rīkam jāstrādā tukšā vidē bez `pip install`).
 ## Pirms koda maiņas
 ```bash
 python3 -m unittest discover -s tests    # visiem jābūt zaļiem, aizņem <1 s
+python3 -m periodika doctor --offline    # vai cauruļvads uz šī datora iet cauri
 ```
+
+Ja lietotājs saka, ka "nestrādā", sāc ar `periodika doctor` — tas pārbauda vidi
+un nolaiž visu cauruļvadu bez tīkla, un katra kļūda pasaka, ko palaist.
 
 ## Darba secība ar dzīvo vietni
 1. `python3 -m periodika probe --sample-issue <ID>` — bez tā profilā nav

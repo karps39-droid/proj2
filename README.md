@@ -18,59 +18,109 @@ Nav nevienas ārējas atkarības — tikai Python 3.11+ standarta bibliotēka.
 
 ---
 
+## Uzstādīšana uz sava datora
+
+Vajag tikai **Python 3.9 vai jaunāku**. Pašam rīkam nav nevienas ārējas
+atkarības — rāpulis, ALTO/METS parsēšana, ortogrāfija, meklēšana un MCP serveris
+strādā ar standarta bibliotēku vien.
+
+**Linux / macOS**
+
+```bash
+git clone <šis repo> periodika-agent && cd periodika-agent
+./install.sh          # virtuālā vide + uzstādīšana + pārbaude
+./install.sh --all    # arī attēlu apstrāde (Pillow) un Anthropic SDK
+source .venv/bin/activate
+```
+
+**Windows (PowerShell)**
+
+```powershell
+git clone <šis repo> periodika-agent; cd periodika-agent
+.\install.ps1         # vai .\install.ps1 -All
+.\.venv\Scripts\Activate.ps1
+```
+
+**Bez uzstādīšanas.** Repozitorija mapē viss strādā uzreiz, arī bez `pip`:
+
+```bash
+python3 -m periodika doctor --offline
+```
+
+### Vai tiešām strādā?
+
+```bash
+periodika doctor
+```
+
+`doctor` pārbauda Python, SQLite ar FTS5, rakstīšanas tiesības, leksikonu,
+neobligātās atkarības un savienojumu ar vietni — un tad **nolaiž visu cauruļvadu
+bez tīkla** uz iebūvēta parauga: ALTO → raksts → vecās ortogrāfijas
+normalizācija → indeksēšana → meklēšana citā ortogrāfijā → kļūdu labošana →
+datumi → vietvārdi. Ja pašpārbaude ir zaļa, rīks uz šī datora strādā; ja kaut kā
+trūkst, katra rinda pasaka, ko tieši palaist.
+
+```
+  [✓] SQLite pilnteksta meklēšana (FTS5): SQLite 3.45.1, FTS5 pieejams
+  [!] tesseract (drukas OCR): nav atrasts
+        -> sudo apt install tesseract-ocr tesseract-ocr-lav tesseract-ocr-frk
+
+  [✓] Meklēšana abās ortogrāfijās: mūsdienu vaicājums: 1, vecās drukas vaicājums: 1
+```
+
+Neobligātās sistēmas pakotnes (tikai attēliem): `tesseract-ocr` ar `lav` un
+`frk` valodām drukas OCR, `poppler-utils` PDF sagriešanai. Bez tām viss pārējais
+strādā, un rokrakstu joprojām var lasīt ar dzinēju `agent`.
+
 ## Ātrais sākums
 
 ```bash
-git clone <šis repo> && cd proj2
-
 # 1. Noskaidro, kuri vietnes galapunkti tiešām strādā (sk. "Kāpēc probe" zemāk)
-python3 -m periodika probe --contact "vards@piemers.lv" \
-        --sample-issue p_001_xxxx1899n01
+periodika probe --contact "vards@piemers.lv" --sample-issue p_001_xxxx1899n01
 
 # 2. Pārmeklē (atsākami — Ctrl+C jebkurā brīdī, pēc tam --resume)
-python3 -m periodika crawl --time 3600 --rate 1 --contact "vards@piemers.lv"
-python3 -m periodika crawl --resume
+periodika crawl --time 3600 --rate 1 --contact "vards@piemers.lv"
+periodika crawl --resume
 
 # 3. Meklē un lasi
-python3 -m periodika search "sabiedrība"           # lokālajā indeksā
-python3 -m periodika search "sabiedrība" --site    # dzīvajā vietnē
-python3 -m periodika search "biedrība" --lang lv   # tikai latviešu raksti
-python3 -m periodika get <dokumenta-id> --both     # oriģināls + mūsdienu rakstība
+periodika search "sabiedrība"           # lokālajā indeksā
+periodika search "sabiedrība" --site    # dzīvajā vietnē
+periodika search "biedrība" --lang lv   # tikai latviešu raksti
+periodika get <dokumenta-id> --both     # oriģināls + mūsdienu rakstība
 
 # 4. Latviešu valodas rīki atsevišķi
-python3 -m periodika lang raksts.txt                       # latviešu/vācu/krievu?
-python3 -m periodika date "1899. gada 1. (13.) maijā"      # vecais un jaunais stils
-python3 -m periodika places --name Jelgava                 # Mitau, Jelgawa, Митава
-python3 -m periodika expand "Jelgavas biedrība"            # visi meklējamie varianti
+periodika lang raksts.txt                       # latviešu/vācu/krievu?
+periodika date "1899. gada 1. (13.) maijā"      # vecais un jaunais stils
+periodika places --name Jelgava                 # Mitau, Jelgawa, Митава
+periodika expand "Jelgavas biedrība"            # visi meklējamie varianti
 
 # 5. Attēli un rokraksts
-python3 -m periodika engines                               # kas šajā vidē pieejams
-python3 -m periodika read vestule.jpg --handwriting        # rokraksta nolasīšana
-python3 -m periodika read lapa.png --engine tesseract --langs lav+frk
-python3 -m periodika correct ocr.txt --handwriting         # kļūdu labošana
+periodika engines                                # kas šajā vidē pieejams
+periodika read vestule.jpg --handwriting         # rokraksta nolasīšana
+periodika read lapa.png --engine tesseract --langs lav+frk
+periodika correct ocr.txt --handwriting          # kļūdu labošana
 ```
+
+Ja neuzstādīji ar `pip`, `periodika` vietā raksti `python3 -m periodika`.
 
 ## Kā to pieslēgt Claude aģentam
 
-Rīki tiek piedāvāti kā MCP serveris (stdio, bez atkarībām):
+Rīki tiek piedāvāti kā MCP serveris (stdio, bez atkarībām). Konfigurāciju ar
+**šī datora** ceļiem uzraksta pati komanda — nav jāmin, kur atrodas Python:
 
 ```bash
-claude mcp add periodika -- python3 -m periodika.mcp_server
+periodika mcp-install                                      # parāda, ko darīt
+periodika mcp-install --target claude-code-lietotāja --write   # ~/.claude.json
+periodika mcp-install --target claude-code-projekta --write    # ./.mcp.json
+periodika mcp-install --target claude-desktop --write          # Claude Desktop
 ```
 
-vai `~/.claude.json` / `.mcp.json`:
+Pirms rakstīšanas tiek saglabāts dublējums, un pārējie MCP serveri konfigurācijā
+paliek neskarti. Pēc tam Claude jāpārstartē. Claude Code lietotāji var arī
+vienkārši palaist izvadīto komandu:
 
-```json
-{
-  "mcpServers": {
-    "periodika": {
-      "command": "python3",
-      "args": ["-m", "periodika.mcp_server"],
-      "cwd": "/ceļš/uz/proj2",
-      "env": { "PERIODIKA_HOME": "~/.config/periodika" }
-    }
-  }
-}
+```bash
+claude mcp add periodika -- /ceļš/uz/.venv/bin/python -m periodika.mcp_server
 ```
 
 Pieejamie rīki:
