@@ -18,6 +18,7 @@ from .config import SiteProfile
 from .htmlutil import parse_html
 from .http_client import FetchError, HttpClient, Response
 from .latvian import analyze_article
+from .pagexml import is_hocr, is_page_xml, parse_hocr, parse_page_xml
 from .store import Document
 
 __all__ = ["identify", "ids_from_url", "documents_from_response", "build_document"]
@@ -34,6 +35,8 @@ def identify(resp: Response) -> str:
         low = head.lower()
         if b"<alto" in low:
             return "alto"
+        if is_page_xml(resp.body):
+            return "page"
         if b"<mets" in low or b"mets/" in low:
             return "mets"
         if b"<tei" in low:
@@ -42,6 +45,8 @@ def identify(resp: Response) -> str:
             return "sitemap"
         if b"oai-pmh" in low:
             return "oai"
+        if is_hocr(resp.body):
+            return "hocr"
         if b"<html" in low or b"<!doctype html" in low or ct.startswith("text/html"):
             return "html"
         return "xml"
@@ -178,15 +183,20 @@ def documents_from_response(
     docs: list[Document] = []
     links: list[str] = []
 
-    if kind == "alto":
-        page = alto_mod.parse_alto(resp.body, resp.url)
+    if kind in ("alto", "page", "hocr"):
+        if kind == "alto":
+            page = alto_mod.parse_alto(resp.body, resp.url)
+        elif kind == "page":
+            page = parse_page_xml(resp.body, resp.url)
+        else:
+            page = parse_hocr(resp.body, resp.url)
         text = page.text(reading_order="columns")
         if text.strip():
             docs.append(
                 build_document(
                     url=resp.url,
                     kind="page",
-                    source_type="alto",
+                    source_type=kind,
                     text=text,
                     profile=profile,
                     issue_id=ids["issue_id"],

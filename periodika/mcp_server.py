@@ -37,7 +37,9 @@ from .latvian import (
     place_variants,
     split_sentences,
 )
+from .correct import correct_text, suspicious_words
 from .orthography import looks_old
+from .recognize import RecognitionError, available_engines, recognize
 from .search import local_search, site_search
 from .store import Store
 
@@ -186,6 +188,40 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
 
     def t_sentences(args: dict) -> Any:
         return {"teikumi": split_sentences(str(args.get("text", "")))}
+
+    def t_read_image(args: dict) -> Any:
+        path = str(args.get("image_path", "")).strip()
+        if not path:
+            return {"kļūda": "jānorāda image_path"}
+        try:
+            return recognize(
+                path,
+                engine=str(args.get("engine", "agent")),
+                handwriting=bool(args.get("handwriting", False)),
+                langs=str(args.get("langs", "")),
+                command=str(args.get("command", "")),
+                segment=bool(args.get("segment_lines", False)),
+                preprocess=bool(args.get("preprocess", True)),
+                correct=bool(args.get("correct", True)),
+                workdir=args.get("workdir") or None,
+            )
+        except RecognitionError as exc:
+            return {"kļūda": str(exc), "pieejamie_dzinēji": available_engines()}
+
+    def t_correct(args: dict) -> Any:
+        text = str(args.get("text", ""))
+        if not text:
+            return {"kļūda": "tukšs teksts"}
+        handwriting = bool(args.get("handwriting", False))
+        if args.get("only_report"):
+            return {"aizdomīgie_vārdi": suspicious_words(text, handwriting=handwriting)}
+        report = correct_text(
+            text, handwriting=handwriting, max_edits=int(args.get("max_edits", 1))
+        )
+        return report.to_json()
+
+    def t_engines(args: dict) -> Any:
+        return available_engines()
 
     def t_crawl(args: dict) -> Any:
         limits = CrawlLimits(
@@ -366,6 +402,70 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
                 },
             },
             t_probe,
+        ),
+        "periodika_read_image": (
+            {
+                "description": (
+                    "Nolasa skenējuma attēlu — drukātu vai rokrakstu. Ar noklusējuma "
+                    "dzinēju 'agent' neko nevajag uzstādīt: attēls tiek izlīdzināts, "
+                    "binarizēts un sagriezts rindās, un tu atgriezto attēlu ceļu atver "
+                    "ar Read rīku un pārraksti pats pēc dotās uzvednes (diplomātiski, "
+                    "bez modernizācijas). Dzinējs 'tesseract' der drukai (lav+frk), "
+                    "'claude' — Anthropic API, 'command' — ārējam HTR dzinējam. "
+                    "Rezultāts iet caur latviešu kļūdu labošanu un analīzi."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "image_path": {"type": "string"},
+                        "engine": {"type": "string",
+                                   "enum": ["agent", "claude", "tesseract", "command"],
+                                   "default": "agent"},
+                        "handwriting": {"type": "boolean", "default": False,
+                                        "description": "rokraksts (19. gs. Kurrent kursīvs)"},
+                        "segment_lines": {"type": "boolean", "default": False},
+                        "preprocess": {"type": "boolean", "default": True},
+                        "correct": {"type": "boolean", "default": True},
+                        "langs": {"type": "string", "description": "tesseract valodas, piem. lav+frk"},
+                        "command": {"type": "string", "description": "ārēja dzinēja komanda"},
+                        "workdir": {"type": "string"},
+                    },
+                    "required": ["image_path"],
+                },
+            },
+            t_read_image,
+        ),
+        "periodika_correct_text": (
+            {
+                "description": (
+                    "Labo atpazīšanas kļūdas latviešu tekstā, izmantojot Fraktur drukas "
+                    "vai Kurrent rokraksta tipiskās sajaukšanas (ſ/f, n/u, e/n, h/b) un "
+                    "latviešu vārdnīcu. Labo tikai tad, ja rezultāts ir atpazīstams vārds, "
+                    "un atskaitās par katru izmaiņu. Lieto uzreiz pēc attēla nolasīšanas."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "handwriting": {"type": "boolean", "default": False},
+                        "max_edits": {"type": "integer", "default": 1},
+                        "only_report": {"type": "boolean", "default": False,
+                                        "description": "tikai aizdomīgie vārdi, bez labošanas"},
+                    },
+                    "required": ["text"],
+                },
+            },
+            t_correct,
+        ),
+        "periodika_recognition_engines": (
+            {
+                "description": (
+                    "Kuri atpazīšanas dzinēji šajā vidē tiešām ir pieejami un kurš der "
+                    "rokrakstam. Izsauc pirms attēla nolasīšanas."
+                ),
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            t_engines,
         ),
         "periodika_detect_language": (
             {

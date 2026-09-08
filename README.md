@@ -12,6 +12,7 @@ Trīs daļas:
 | **Nolasītājs** | METS + ALTO (un TEI) parsēšana: no OCR blokiem uz veseliem rakstiem ar virsrakstu, datumu, lappusi un OCR ticamību. |
 | **Vecā druka** | Fraktur OCR tīrīšana, vecās ortogrāfijas pārrakstīšana mūsdienu rakstībā un vaicājumu paplašināšana pretējā virzienā. |
 | **Latviešu valoda** | Celmošana un locīšana, vārdnīca vecā `s`/`z` izšķiršanai, valodas noteikšana, latviskie datumi ar veco/jauno stilu, vēsturiskie vietvārdi. |
+| **Attēli un rokraksts** | Skenējuma sagatavošana, rindu sagriešana, OCR/HTR dzinēju adapteri, PAGE XML/hOCR ievade un Fraktur/Kurrent kļūdu labošana pēc vārdnīcas. |
 
 Nav nevienas ārējas atkarības — tikai Python 3.11+ standarta bibliotēka.
 
@@ -41,6 +42,12 @@ python3 -m periodika lang raksts.txt                       # latviešu/vācu/kri
 python3 -m periodika date "1899. gada 1. (13.) maijā"      # vecais un jaunais stils
 python3 -m periodika places --name Jelgava                 # Mitau, Jelgawa, Митава
 python3 -m periodika expand "Jelgavas biedrība"            # visi meklējamie varianti
+
+# 5. Attēli un rokraksts
+python3 -m periodika engines                               # kas šajā vidē pieejams
+python3 -m periodika read vestule.jpg --handwriting        # rokraksta nolasīšana
+python3 -m periodika read lapa.png --engine tesseract --langs lav+frk
+python3 -m periodika correct ocr.txt --handwriting         # kļūdu labošana
 ```
 
 ## Kā to pieslēgt Claude aģentam
@@ -81,6 +88,9 @@ Pieejamie rīki:
 | `periodika_parse_date` | `1899. gada 1. (13.) maijā` → jaunais un vecais stils. |
 | `periodika_place_names` | `Jelgava` ↔ `Mitau` / `Jelgawa` / `Митава`. |
 | `periodika_split_sentences` | Teikumi, neapraujot `1899. g.`, `u.c.`, `lpp.` |
+| `periodika_read_image` | Nolasa skenējumu — druku vai rokrakstu. |
+| `periodika_correct_text` | Labo Fraktur/Kurrent atpazīšanas kļūdas pēc vārdnīcas. |
+| `periodika_recognition_engines` | Kuri atpazīšanas dzinēji šajā vidē pieejami. |
 | `periodika_probe` | Noskaidro vietnes galapunktus un saglabā profilu. |
 | `periodika_status` | Frontes, krātuves un HTTP statistika. |
 
@@ -215,6 +225,79 @@ transkripcija. Zinātniskam citātam lieto `text_raw` un saiti uz skenējumu
 
 ---
 
+## Rokraksts un attēli
+
+Rāpulis strādā ar to, kas periodikā jau ir OCR'ots. Bet daudz kas ir tikai
+attēls — un rokraksts (vēstules, protokolu grāmatas, korespondentu manuskripti)
+gandrīz nekad nav atpazīts. Šī daļa nolasa attēlu un ieved to tajā pašā
+cauruļvadā.
+
+### Kurš dzinējs kuram uzdevumam
+
+```bash
+python3 -m periodika engines        # ko šī vide tiešām spēj
+```
+
+| Dzinējs | Rokrakstam | Vajag | Kad lietot |
+|---|---|---|---|
+| `agent` *(noklusējums)* | jā | neko | Aģents pats ir redzes modelis — rīks sagatavo attēlu un rindas, aģents nolasa ar `Read`. Šobrīd labākais ceļš latviešu rokrakstam. |
+| `claude` | jā | `anthropic` + akreditācija | Tas pats caur API, pakešapstrādei bez aģenta. |
+| `tesseract` | **nē** | `tesseract-ocr-lav`, `-frk` | Laba druka, arī Fraktur. Rokrakstam neder — tas nav HTR dzinējs. |
+| `command` | jā | ārējs dzinējs | Kraken, Loghi, Calamari, eScriptorium — komandu norādi pats. |
+
+```bash
+# Rokraksts: attēls tiek izlīdzināts, binarizēts, sagriezts rindās
+python3 -m periodika read vestule.jpg --handwriting
+
+# Druka ar Fraktur modeli
+python3 -m periodika read lapa.png --engine tesseract --langs lav+frk
+
+# Ārējs HTR modelis
+python3 -m periodika read lapa.png --engine command \
+        --command "kraken -i {image} {out} segment ocr -m latvian_htr.mlmodel"
+```
+
+Ārējo dzinēju izvade (PAGE XML, ALTO, hOCR) tiek parsēta tāpat kā rāpuļa
+atrastie faili, tāpēc rindu ticamība un ģeometrija nepazūd.
+
+### Diplomātiska transkripcija
+
+Uzvedne redzes modelim apzināti **aizliedz modernizēt** nolasīšanas laikā:
+`w` paliek `w`, `ee` paliek `ee`, garais `ſ` paliek `ſ`, rindu dalījums un
+pārnesumi saglabājas, nesalasāms vārds tiek atzīmēts kā `[vārds?]`, nevis
+uzminēts. Pārrakstīšana mūsdienu rakstībā ir **atsevišķs solis** — tā oriģināls
+paliek pieejams citātam, un normalizācija ir atmetama.
+
+### Sistemātisku kļūdu labošana
+
+Gan Fraktur druka, gan Kurrent rokraksts kļūdās *paredzami*, un to var izmantot:
+
+| Raksta veids | Tipiskās sajaukšanas |
+|---|---|
+| Fraktur druka | `ſ`↔`f`, `n`↔`u`, `e`↔`c`, `I`↔`J` (Frakturā gandrīz identiski), `rn`↔`m` |
+| Kurrent rokraksts | `e`↔`n`, `n`↔`u`, `h`↔`b`, `a`↔`o`, `z`↔`y`, `v`↔`r` |
+
+```
+$ echo "Rigaf latviefu biedriba un fkola" | python3 -m periodika correct -
+Rigas latviesu biedriba un skola
+```
+
+Labojums notiek **tikai tad**, ja rezultāts ir latviešu vārdnīcā atpazīstams
+vārds — un katra izmaiņa tiek pierakstīta. Personvārdi (`Blaumanis`) netiek
+aiztikti; tie nonāk sarakstā `neatpazītie_vārdi`, ko var apskatīt atsevišķi ar
+`periodika correct --suspicious`.
+
+### Ko šis rīks *nedara*
+
+Repozitorijā **nav iepakota neviena atpazīšanas modeļa** — te ir adapteri, un
+katrs pasaka, kas tam vajadzīgs. Rokraksta atpazīšana joprojām ir grūtākā daļa:
+19. gadsimta latviešu rokraksts ir vācu Kurrent kursīvs, kur `n` un `u` atšķiras
+tikai ar lociņu, un neviens dzinējs to nelasa bez kļūdām. Tāpēc plūsma ir
+veidota ap pārbaudāmību: ticamība katrai rindai, atzīmēti minējumi, pierakstīti
+labojumi un vienmēr saglabāts oriģināls.
+
+---
+
 ## Pieklājīga rāpošana
 
 Noklusējumi ir apzināti lēni: **1 pieprasījums sekundē, 1 darbinieks**,
@@ -244,9 +327,13 @@ periodika/
   latvian.py      celmošana, locīšana, leksikons, valodas noteikšana,
                   datumi (vecais/jaunais stils), vēsturiskie vietvārdi
   data/lv_wordlist.txt  latviešu vārdu saraksts s/z izšķiršanai
+  images.py       skenējuma sagatavošana un rindu sagriešana (Pillow, neobligāts)
+  recognize.py    OCR/HTR dzinēju adapteri + transkripcijas uzvedne
+  correct.py      Fraktur/Kurrent kļūdu labošana pēc vārdnīcas
+  pagexml.py      PAGE XML un hOCR (HTR dzinēju izvade)
   cli.py          komandrinda
   mcp_server.py   MCP rīki Claude aģentam
-tests/            104 testi, bez tīkla (paraugi tests/fixtures/)
+tests/            138 testi, bez tīkla un bez ārējiem dzinējiem
 ```
 
 ## Testi

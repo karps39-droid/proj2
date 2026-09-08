@@ -30,6 +30,7 @@ from typing import Iterable, Sequence
 from .orthography import (
     NormalizeOptions,
     clean_ocr,
+    fold,
     long_s_variant,
     modern_to_old_variants,
     old_to_modern,
@@ -151,6 +152,8 @@ class Lexicon:
 
     words: set[str] = field(default_factory=set)
     stems: set[str] = field(default_factory=set)
+    #: "Salocītās" formas — sedz gan veco, gan mūsdienu rakstību (ſchodeen = šodien).
+    folds: set[str] = field(default_factory=set)
 
     @classmethod
     def from_lines(cls, lines: Iterable[str]) -> "Lexicon":
@@ -167,6 +170,7 @@ class Lexicon:
         self.words.add(lowered)
         self.words.add(deaccent(lowered))
         self.stems.add(stem(lowered))
+        self.folds.add(fold(lowered))
 
     def __len__(self) -> int:
         return len(self.words)
@@ -178,6 +182,18 @@ class Lexicon:
             or deaccent(lowered) in self.words
             or stem(lowered) in self.stems
         )
+
+    def matches(self, word: str, *, allow_old_orthography: bool = True) -> bool:
+        """Vai vārds ir atpazīstams — mūsdienu vai vecajā rakstībā, jebkurā locījumā."""
+        if self.contains(word):
+            return True
+        if not allow_old_orthography:
+            return False
+        folded = fold(word)
+        if folded in self.folds:
+            return True
+        modern = old_to_modern(word)
+        return modern.lower() != word.lower() and self.contains(modern)
 
     def correct(self, word: str) -> str:
         """Izšķir veco ``s`` (= mūsdienu ``s`` vai ``z``) ar vārdnīcas palīdzību.
@@ -224,8 +240,15 @@ def default_lexicon(path: str | None = None) -> Lexicon:
     try:
         lines = target.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return Lexicon()
-    return Lexicon.from_lines(lines)
+        lines = []
+    lexicon = Lexicon.from_lines(lines)
+    # Vietvārdi arī pieder leksikonam: citādi pēclabošana mēģinātu "izlabot"
+    # Rīgu vai Mitau par kaut ko citu.
+    for modern, historic in PLACES.items():
+        lexicon.add(modern)
+        for name in historic:
+            lexicon.add(name)
+    return lexicon
 
 
 def normalize_lv(text: str, *, use_lexicon: bool = True,

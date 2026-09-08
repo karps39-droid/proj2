@@ -46,6 +46,20 @@ tekstam — nemēģini normalizēt vācu rakstu ar `old_to_modern`, tas to saboj
 presē datums parasti ir Jūlija kalendārā — ja raksti par datējumu, saki, kurš
 stils ir domāts (`calendar` lauks to pasaka).
 
+## Kad jālasa attēls vai rokraksts
+1. `periodika_recognition_engines` — pārbaudi, kas vidē ir pieejams.
+2. `periodika_read_image` ar `engine="agent"` (noklusējums) sagatavo attēlu un
+   atdod ceļus + uzvedni. **Tu pats esi redzes modelis** — atver sagatavoto
+   attēlu (rokrakstam: rindu izgriezumus pa vienam) ar `Read` un pārraksti.
+3. Transkribē **diplomātiski**: `w` paliek `w`, `ee` paliek `ee`, garais `ſ`
+   paliek. Nesalasāmu vārdu atzīmē `[vārds?]` — nekad nemini.
+4. Rezultātu padod `periodika_correct_text` (ar `handwriting=true`, ja rokraksts),
+   tad `periodika_normalize_text`.
+
+Rokraksts 19. gs. ir vācu Kurrent kursīvs: `n`/`u` atšķiras tikai ar lociņu,
+`e` ir divi sīki vilcieni, `h`/`b` mēdz sajaukties. Ja neesi drošs — atzīmē, nemini.
+`tesseract` rokrakstam neder; tas ir drukas dzinējs.
+
 ## Rāpošanas ētika
 Noklusējuma 1 pieprasījums/s un `robots.txt` ievērošana nav dekorācija.
 Nepalielini `--rate` un neieslēdz `--ignore-robots` bez lietotāja skaidra

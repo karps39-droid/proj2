@@ -10,6 +10,9 @@
     periodika lang teksts.txt                          # latviešu / vācu / krievu?
     periodika date "1899. gada 1. (13.) maijā"         # vecais un jaunais stils
     periodika places --name Jelgava                    # Mitau, Jelgawa, Митава
+    periodika read lapa.png --handwriting              # rokraksta nolasīšana
+    periodika engines                                  # kas šajā vidē pieejams
+    periodika correct ocr.txt --handwriting            # atpazīšanas kļūdu labošana
     periodika export raksti.jsonl
     periodika mcp                                      # MCP serveris Claude aģentam
 """
@@ -41,6 +44,8 @@ from .orthography import (
     looks_old,
     modern_to_old_variants,
 )
+from .correct import correct_text, suspicious_words
+from .recognize import RecognitionError, available_engines, recognize
 from .search import local_search, site_search
 from .store import Store
 
@@ -276,6 +281,53 @@ def _read_text(path: str | None) -> str:
     return Path(path).read_text(encoding="utf-8", errors="replace")
 
 
+def cmd_read(args: argparse.Namespace) -> int:
+    """Nolasa attēlu (druku vai rokrakstu) un izlaiž caur latviešu pēcapstrādi."""
+    try:
+        result = recognize(
+            args.image,
+            engine=args.engine,
+            handwriting=args.handwriting,
+            langs=args.langs or "",
+            psm=args.psm,
+            command=args.command or "",
+            model=args.model,
+            preprocess=not args.no_preprocess,
+            segment=args.segment,
+            correct=not args.no_correct,
+            workdir=args.workdir,
+        )
+    except RecognitionError as exc:
+        print(f"Atpazīšana neizdevās: {exc}", file=sys.stderr)
+        return 1
+    if args.json or args.engine == "agent":
+        _print(result, True)
+        return 0
+    print(result.get("teksts", ""))
+    if result.get("labojumi"):
+        print(f"\n[{len(result['labojumi'])} labojumi; "
+              f"neatpazīti: {len(result.get('neatpazītie_vārdi', []))}]", file=sys.stderr)
+    return 0
+
+
+def cmd_engines(args: argparse.Namespace) -> int:
+    _print(available_engines(), True)
+    return 0
+
+
+def cmd_correct(args: argparse.Namespace) -> int:
+    text = _read_text(args.path)
+    if args.suspicious:
+        _print(suspicious_words(text, handwriting=args.handwriting), True)
+        return 0
+    report = correct_text(text, handwriting=args.handwriting, max_edits=args.max_edits)
+    if args.json:
+        _print(report.to_json(), True)
+    else:
+        print(report.text)
+    return 0
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     cfg = _build_config(args)
     n = Store(cfg.db_path()).export_jsonl(args.path)
@@ -398,6 +450,35 @@ def build_parser() -> argparse.ArgumentParser:
     spl.add_argument("--name", help="mūsdienu vietvārds -> vēsturiskie varianti")
     spl.add_argument("path", nargs="?", default="-", help="teksts, kurā meklēt vietvārdus")
     spl.set_defaults(func=cmd_places)
+
+    sr = sub.add_parser("read", parents=[common],
+                        help="nolasa attēlu: druku vai rokrakstu (OCR/HTR)")
+    sr.add_argument("image", help="attēla fails (PNG/JPG/TIFF)")
+    sr.add_argument("--engine", default="agent",
+                    choices=["agent", "claude", "tesseract", "command"])
+    sr.add_argument("--handwriting", action="store_true", help="rokraksts (Kurrent kursīvs)")
+    sr.add_argument("--langs", help="tesseract valodas, piem. lav+frk")
+    sr.add_argument("--psm", type=int, default=4)
+    sr.add_argument("--command", help="ārēja dzinēja komanda ar {image} un {out}")
+    sr.add_argument("--model", default="claude-opus-5")
+    sr.add_argument("--segment", action="store_true", help="sagriezt lappusi rindās")
+    sr.add_argument("--no-preprocess", action="store_true")
+    sr.add_argument("--no-correct", action="store_true")
+    sr.add_argument("--workdir", help="kur likt sagatavotos attēlus")
+    sr.set_defaults(func=cmd_read)
+
+    sen = sub.add_parser("engines", parents=[common],
+                         help="kuri atpazīšanas dzinēji ir pieejami")
+    sen.set_defaults(func=cmd_engines)
+
+    sco = sub.add_parser("correct", parents=[common],
+                         help="labo OCR/HTR kļūdas pēc latviešu vārdnīcas")
+    sco.add_argument("path", nargs="?", default="-")
+    sco.add_argument("--handwriting", action="store_true", help="Kurrent rokraksta sajaukumi")
+    sco.add_argument("--suspicious", action="store_true",
+                     help="tikai saraksts ar neatpazītajiem vārdiem")
+    sco.add_argument("--max-edits", type=int, default=1)
+    sco.set_defaults(func=cmd_correct)
 
     sx = sub.add_parser("export", parents=[common], help="eksportē krātuvi JSONL formātā")
     sx.add_argument("path")
