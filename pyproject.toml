@@ -13,11 +13,13 @@ dependencies = []
 
 [project.optional-dependencies]
 # Nav obligāti: headless renderēšana SPA lapām, ja probe konstatē, ka bez tā neiztikt.
-render = ["playwright>=1.40"]
+browser = ["playwright>=1.40"]
 # Skenējumu priekšapstrāde un rindu sagriešana.
 images = ["Pillow>=10.0"]
 # Atpazīšana caur Anthropic API (dzinējs `claude`); dzinējam `agent` nekas nav vajadzīgs.
 claude = ["anthropic>=0.40"]
+# Viss kopā.
+all = ["playwright>=1.40", "Pillow>=10.0", "anthropic>=0.40"]
 
 [project.scripts]
 periodika = "periodika.cli:main"

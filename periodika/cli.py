@@ -14,6 +14,8 @@
     periodika engines                                  # kas šajā vidē pieejams
     periodika correct ocr.txt --handwriting            # atpazīšanas kļūdu labošana
     periodika export raksti.jsonl
+    periodika browse "<skatītāja saite>"               # ieiet lapā un nolasīt (SPA)
+    periodika sniff "<skatītāja saite>" --save-profile  # atrast datu galapunktus
     periodika doctor                                   # vai viss strādā uz šī datora?
     periodika mcp-install --target claude-code-lietotāja --write
     periodika mcp                                      # MCP serveris Claude aģentam
@@ -46,6 +48,7 @@ from .orthography import (
     looks_old,
     modern_to_old_variants,
 )
+from .browser import BrowserUnavailable, browser_available, discover_endpoints, read_page
 from .correct import correct_text, suspicious_words
 from .doctor import format_report, run_diagnostics, self_test
 from .setup_mcp import claude_cli_command, config_targets, install_into
@@ -105,7 +108,10 @@ def cmd_probe(args: argparse.Namespace) -> int:
 def cmd_crawl(args: argparse.Namespace) -> int:
     cfg = _build_config(args)
     store = Store(cfg.db_path())
-    crawler = Crawler(cfg, store=store, on_event=_progress(args.quiet))
+    crawler = Crawler(
+        cfg, store=store, on_event=_progress(args.quiet),
+        render=args.render, render_save_data_to=args.render_save_data,
+    )
     if not args.resume:
         added = crawler.seed(args.seed or ())
         print(f"Sēklas frontē: +{added}", file=sys.stderr)
@@ -345,6 +351,59 @@ def cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_browse(args: argparse.Namespace) -> int:
+    """Atver lapu īstā pārlūkā un nolasa uzzīmēto saturu."""
+    cfg = _build_config(args)
+    try:
+        page = read_page(
+            args.url,
+            wait_for=args.wait_for or "",
+            save_data_to=args.save_data,
+            screenshot_to=args.screenshot,
+            headless=not args.show,
+            timeout=cfg.policy.timeout,
+            user_agent=cfg.policy.effective_user_agent(),
+        )
+    except BrowserUnavailable as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if args.json:
+        _print(page.to_json(), True)
+        return 0
+    print(f"# {page.title}\n# {page.url}\n")
+    print(page.text[: args.chars])
+    data = page.data_calls()
+    if data:
+        print(f"\n[{len(data)} datu pieprasījumi]", file=sys.stderr)
+        for call in data[:10]:
+            print(f"  {call.url}", file=sys.stderr)
+    return 0
+
+
+def cmd_sniff(args: argparse.Namespace) -> int:
+    """Noskaidro, no kurienes lietotne ņem datus, un piedāvā profila veidnes."""
+    cfg = _build_config(args)
+    try:
+        result = discover_endpoints(
+            args.url,
+            issue_id=args.issue or "",
+            save_data_to=args.save_data,
+            timeout=cfg.policy.timeout,
+            user_agent=cfg.policy.effective_user_agent(),
+        )
+    except BrowserUnavailable as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    updates = result.get("ieteiktais_profils") or {}
+    if args.save_profile and updates:
+        for field_name, template in updates.items():
+            setattr(cfg.profile, field_name, template)
+        path = cfg.save(args.config)
+        result["profils_saglabāts"] = str(path)
+    _print(result, True)
+    return 0 if updates else 1
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     cfg = _build_config(args)
     env = run_diagnostics(cfg, check_network=not args.offline)
@@ -431,6 +490,9 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--time", type=float, default=0.0, help="laika budžets sekundēs")
     sc.add_argument("--max-pages-per-issue", type=int, default=0)
     sc.add_argument("--quiet", action="store_true")
+    sc.add_argument("--render", action="store_true",
+                    help="lapas bez teksta HTML avotā atvērt īstā pārlūkā (SPA)")
+    sc.add_argument("--render-save-data", help="kur saglabāt pārlūkā pārtvertos datus")
     sc.set_defaults(func=cmd_crawl)
 
     si = sub.add_parser("issue", parents=[common], help="ielādē vienu laidienu un izvelk rakstus")
@@ -527,6 +589,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = sub.add_parser("stats", parents=[common], help="krātuves un frontes statistika")
     st.set_defaults(func=cmd_stats)
+
+    sb = sub.add_parser("browse", parents=[common],
+                        help="atver lapu pārlūkā un nolasa uzzīmēto saturu (SPA)")
+    sb.add_argument("url")
+    sb.add_argument("--wait-for", help="CSS selektors, ko sagaidīt")
+    sb.add_argument("--save-data", help="mape, kur saglabāt lietotnes ielādētos datus")
+    sb.add_argument("--screenshot", help="ekrānuzņēmuma fails (var padot `periodika read`)")
+    sb.add_argument("--show", action="store_true", help="rādīt pārlūka logu (atkļūdošanai)")
+    sb.add_argument("--chars", type=int, default=8000)
+    sb.set_defaults(func=cmd_browse)
+
+    ssn = sub.add_parser("sniff", parents=[common],
+                         help="noskaidro lietotnes datu galapunktus un uzraksta profilu")
+    ssn.add_argument("url", nargs="+", help="viena vai vairākas skatītāja saites")
+    ssn.add_argument("--issue", help="laidiena ID, ko aizstāt ar {issue}")
+    ssn.add_argument("--save-data", help="mape, kur saglabāt pārtvertos datus")
+    ssn.add_argument("--save-profile", action="store_true",
+                     help="ierakstīt atrastās veidnes konfigurācijā")
+    ssn.set_defaults(func=cmd_sniff)
 
     sdoc = sub.add_parser("doctor", parents=[common],
                           help="pārbauda, vai viss strādā uz šī datora")

@@ -35,6 +35,18 @@ from .config import CrawlPolicy
 __all__ = ["Response", "HttpClient", "RateLimiter", "FetchError"]
 
 
+def _latin1_safe(value: str) -> str:
+    try:
+        value.encode("latin-1")
+        return value
+    except UnicodeEncodeError:
+        import unicodedata
+
+        return (
+            unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+        )
+
+
 class FetchError(RuntimeError):
     """Neatgūstama kļūda pēc visiem atkārtojumiem."""
 
@@ -273,6 +285,8 @@ class HttpClient:
             "Accept-Language": "lv,en;q=0.7",
         }
         headers.update(extra_headers or {})
+        # urllib kodē galvenes latin-1: viena garumzīme te nogalinātu pieprasījumu.
+        headers = {k: _latin1_safe(v) for k, v in headers.items()}
         req = urllib.request.Request(url, headers=headers, method=method)
         started = time.monotonic()
         with self._opener.open(req, timeout=self.policy.timeout) as fh:

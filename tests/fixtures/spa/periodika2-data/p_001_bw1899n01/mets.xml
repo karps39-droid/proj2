@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mets:mets xmlns:mets="http://www.loc.gov/METS/" xmlns:mods="http://www.loc.gov/mods/v3">
+  <mets:dmdSec ID="D1"><mets:mdWrap><mets:xmlData><mods:mods>
+    <mods:titleInfo><mods:title>Baltijas Wehstnesis</mods:title></mods:titleInfo>
+    <mods:originInfo><mods:dateIssued>1899-05-01</mods:dateIssued></mods:originInfo>
+  </mods:mods></mets:xmlData></mets:mdWrap></mets:dmdSec>
+</mets:mets>

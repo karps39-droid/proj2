@@ -14,10 +14,12 @@ cd "$ROOT"
 
 EXTRAS=""
 USE_VENV=1
+BROWSER=0
 for arg in "$@"; do
   case "$arg" in
-    --all)     EXTRAS="[images,claude]" ;;
+    --all)     EXTRAS="[images,claude,browser]"; BROWSER=1 ;;
     --images)  EXTRAS="[images]" ;;
+    --browser) EXTRAS="[browser]"; BROWSER=1 ;;
     --no-venv) USE_VENV=0 ;;
     -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "nezināms arguments: $arg" >&2; exit 2 ;;
@@ -48,6 +50,12 @@ fi
 echo "==> Uzstādu periodika-agent$EXTRAS"
 "$PYTHON" -m pip install --quiet --upgrade pip
 "$PYTHON" -m pip install --quiet -e ".$EXTRAS"
+
+if [ "$BROWSER" -eq 1 ]; then
+  echo "==> Lejupielādēju Chromium (SPA lapu lasīšanai)"
+  "$PYTHON" -m playwright install chromium || \
+    echo "    Neizdevās. Ja Chromium jau ir, norādi PERIODIKA_CHROMIUM=/ceļš/uz/chrome"
+fi
 
 echo "==> Sistēmas rīki (neobligāti)"
 for tool in tesseract pdftoppm; do

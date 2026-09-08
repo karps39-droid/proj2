@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="lv"><head><meta charset="utf-8"><title>Periodika skatītājs</title></head>
+<body>
+  <div id="app">Ielādē…</div>
+  <script>
+    // Atdarina periodika2-viewer: saturs ienāk tikai ar JavaScript,
+    // un teksts tiek zīmēts pakāpeniski (divos gājienos).
+    function route() {
+      const h = decodeURIComponent(location.hash || "");
+      const issue = (h.match(/issue:\/([^|]+)/) || [])[1] || "";
+      const page = (h.match(/page:(\d+)/) || [])[1] || "1";
+      return { issue, page };
+    }
+    async function load() {
+      const { issue, page } = route();
+      if (!issue) { document.getElementById("app").textContent = "Nav laidiena"; return; }
+      const mets = await fetch(`/periodika2-data/${issue}/mets.xml`).then(r => r.text());
+      const title = (mets.match(/<mods:title>([^<]+)</) || [])[1] || "";
+      const n = String(page).padStart(8, "0");
+      const alto = await fetch(`/periodika2-data/${issue}/alto/${n}.xml`).then(r => r.text());
+      const words = [...alto.matchAll(/CONTENT="([^"]*)"/g)].map(m => m[1]);
+      document.getElementById("app").innerHTML =
+        `<h1>${title}</h1><div id="article-text"></div>
+         <a href="#panel:pa|issue:/${issue}|page:2">Nākamā lappuse</a>`;
+      // pakāpeniska zīmēšana: networkidle nostrādā par agru
+      setTimeout(() => {
+        document.getElementById("article-text").textContent = words.join(" ");
+      }, 600);
+    }
+    addEventListener("hashchange", load);
+    load();
+  </script>
+</body></html>

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,16 @@ DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = (
     "periodika.lv",
     "www.periodika.lv",
 )
+
+
+def _ascii_header(value: str) -> str:
+    """HTTP galvenes ir latin-1; diakritiku pārrakstām, lai nekas neuzsprāgtu.
+
+    Bez šī jebkurš kontakts ar garumzīmi (vai latviskais noklusējums) nogalinātu
+    katru pieprasījumu ar UnicodeEncodeError jau pirms tīkla.
+    """
+    normalized = unicodedata.normalize("NFKD", value)
+    return normalized.encode("ascii", "ignore").decode("ascii").strip()
 
 
 def default_config_dir() -> Path:
@@ -43,9 +54,9 @@ class CrawlPolicy:
     darbinieks. Bibliotēkas serveris ir kopīgs resurss — palielini apzināti.
     """
 
+    #: HTTP galvenes kodē latin-1, tāpēc User-Agent jābūt ASCII.
     user_agent: str = (
-        "periodika-agent/0.1 (+pētniecisks pilnteksta rāpulis; "
-        "kontakts konfigurējams ar --contact)"
+        "periodika-agent/0.1 (+research full-text crawler; contact via --contact)"
     )
     contact: str = ""
     requests_per_second: float = 1.0
@@ -62,9 +73,8 @@ class CrawlPolicy:
     cache_ttl: float = 7 * 24 * 3600.0
 
     def effective_user_agent(self) -> str:
-        if self.contact:
-            return f"{self.user_agent} kontakts: {self.contact}"
-        return self.user_agent
+        value = f"{self.user_agent} contact: {self.contact}" if self.contact else self.user_agent
+        return _ascii_header(value)
 
 
 @dataclass

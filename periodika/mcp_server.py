@@ -37,6 +37,7 @@ from .latvian import (
     place_variants,
     split_sentences,
 )
+from .browser import BrowserUnavailable, browser_available, discover_endpoints, read_page
 from .correct import correct_text, suspicious_words
 from .orthography import looks_old
 from .recognize import RecognitionError, available_engines, recognize
@@ -221,7 +222,44 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
         return report.to_json()
 
     def t_engines(args: dict) -> Any:
-        return available_engines()
+        return {**available_engines(), "pārlūks": browser_available()}
+
+    def t_browse(args: dict) -> Any:
+        url = str(args.get("url", "")).strip()
+        if not url:
+            return {"kļūda": "jānorāda url"}
+        try:
+            page = read_page(
+                url,
+                wait_for=str(args.get("wait_for", "")),
+                save_data_to=args.get("save_data_to") or None,
+                screenshot_to=args.get("screenshot_to") or None,
+                timeout=config.policy.timeout,
+                user_agent=config.policy.effective_user_agent(),
+            )
+        except BrowserUnavailable as exc:
+            return {"kļūda": str(exc), "pārlūks": browser_available()}
+        payload = page.to_json()
+        limit = int(args.get("max_chars", 20000))
+        if len(payload.get("teksts", "")) > limit:
+            payload["teksts"] = payload["teksts"][:limit]
+            payload["saīsināts"] = True
+        return payload
+
+    def t_sniff(args: dict) -> Any:
+        urls = args.get("urls") or ([args["url"]] if args.get("url") else [])
+        if not urls:
+            return {"kļūda": "jānorāda urls"}
+        try:
+            return discover_endpoints(
+                [str(u) for u in urls],
+                issue_id=str(args.get("issue_id", "")),
+                save_data_to=args.get("save_data_to") or None,
+                timeout=config.policy.timeout,
+                user_agent=config.policy.effective_user_agent(),
+            )
+        except BrowserUnavailable as exc:
+            return {"kļūda": str(exc), "pārlūks": browser_available()}
 
     def t_crawl(args: dict) -> Any:
         limits = CrawlLimits(
@@ -466,6 +504,51 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
                 "inputSchema": {"type": "object", "properties": {}},
             },
             t_engines,
+        ),
+        "periodika_browse_page": (
+            {
+                "description": (
+                    "Atver lapu īstā pārlūkā un nolasa uzzīmēto saturu. Vajadzīgs "
+                    "periodika2-viewer lapām: tās ir vienas lapas lietotnes, kur teksta "
+                    "HTML avotā nav un parasts pieprasījums neko neatrod. Atgriež arī "
+                    "sarakstu ar datu pieprasījumiem, ko lietotne izdarīja."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "wait_for": {"type": "string", "description": "CSS selektors, ko sagaidīt"},
+                        "save_data_to": {"type": "string",
+                                         "description": "mape pārtverto datu failiem"},
+                        "screenshot_to": {"type": "string",
+                                          "description": "ekrānuzņēmums; padod to periodika_read_image"},
+                        "max_chars": {"type": "integer", "default": 20000},
+                    },
+                    "required": ["url"],
+                },
+            },
+            t_browse,
+        ),
+        "periodika_discover_endpoints": (
+            {
+                "description": (
+                    "Atver skatītāja lapas pārlūkā un noskaidro, no kurienes lietotne ņem "
+                    "datus (METS/ALTO/JSON), tad uzģenerē URL veidnes profilam. Pēc tam "
+                    "rāpulis strādā tieši ar datu slāni — bez pārlūka. Lieto, kad `probe` "
+                    "neatrada ceļus."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "urls": {"type": "array", "items": {"type": "string"}},
+                        "issue_id": {"type": "string",
+                                     "description": "laidiena ID, ko aizstāt ar {issue}"},
+                        "save_data_to": {"type": "string"},
+                    },
+                    "required": ["urls"],
+                },
+            },
+            t_sniff,
         ),
         "periodika_detect_language": (
             {

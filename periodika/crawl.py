@@ -13,6 +13,7 @@ kā dabūt tīri sagrieztus rakstus, nevis lappušu tekstu.
 from __future__ import annotations
 
 import re
+import threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,11 +22,14 @@ from typing import Callable, Iterable, Sequence
 
 from .config import Config
 from .discovery import iter_oai_identifiers, iter_sitemap_urls
-from .extract import documents_from_response, ids_from_url
+from .extract import build_document, documents_from_response, ids_from_url
 from .http_client import FetchError, HttpClient
 from .store import Document, Store
 
 __all__ = ["Crawler", "CrawlLimits", "CrawlResult", "normalize_url"]
+
+#: Cik daudz uzzīmēta teksta pietiek, lai lapu uzskatītu par saturu.
+_MIN_RENDERED_TEXT = 40
 
 _TRACKING_PARAMS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"}
 
@@ -57,6 +61,41 @@ def normalize_url(url: str, *, keep_fragment: bool = True) -> str:
     path = re.sub(r"/{2,}", "/", parts.path) or "/"
     fragment = parts.fragment if keep_fragment else ""
     return urllib.parse.urlunsplit((parts.scheme, netloc, path, query, fragment))
+
+
+class _Renderer:
+    """Pārlūks katram darbinieka pavedienam (Playwright sinhronā API nav koplietojama)."""
+
+    def __init__(self, timeout: float, user_agent: str, save_data_to=None) -> None:
+        self.timeout = timeout
+        self.user_agent = user_agent
+        self.save_data_to = save_data_to
+        self._local = threading.local()
+        self._all: list = []
+        self._lock = threading.Lock()
+
+    def reader(self):
+        reader = getattr(self._local, "reader", None)
+        if reader is None:
+            from .browser import BrowserReader
+
+            reader = BrowserReader(timeout=self.timeout, user_agent=self.user_agent).__enter__()
+            self._local.reader = reader
+            with self._lock:
+                self._all.append(reader)
+        return reader
+
+    def read(self, url: str):
+        return self.reader().read(url, save_data_to=self.save_data_to)
+
+    def close(self) -> None:
+        with self._lock:
+            readers, self._all = self._all, []
+        for reader in readers:
+            try:
+                reader.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 @dataclass
@@ -98,6 +137,8 @@ class Crawler:
         client: HttpClient | None = None,
         *,
         on_event: Callable[[str, dict], None] | None = None,
+        render: bool = False,
+        render_save_data_to: str | None = None,
     ) -> None:
         self.config = config
         self.profile = config.profile
@@ -106,6 +147,17 @@ class Crawler:
         self.on_event = on_event or (lambda kind, data: None)
         self._deny = [re.compile(p, re.I) for p in self.profile.deny_patterns]
         self._prefer = [re.compile(p, re.I) for p in self.profile.prefer_patterns]
+        #: Ja ieslēgts, lapas bez teksta HTML avotā tiek atvērtas īstā pārlūkā.
+        self.render = render or self.profile.requires_javascript
+        self._renderer = (
+            _Renderer(
+                timeout=self.config.policy.timeout,
+                user_agent=self.config.policy.effective_user_agent(),
+                save_data_to=render_save_data_to,
+            )
+            if self.render
+            else None
+        )
 
     # -- URL politika ---------------------------------------------------
     def in_scope(self, url: str) -> bool:
@@ -238,6 +290,8 @@ class Crawler:
                         self.on_event("error", {"url": url, "kļūda": repr(exc)})
                     if budget_exhausted():
                         break
+        if self._renderer is not None:
+            self._renderer.close()
         self.store.set_meta("last_crawl", str(time.time()))
         return result
 
@@ -252,10 +306,54 @@ class Crawler:
             client=self.client,
             max_pages_per_issue=limits.max_pages_per_issue,
         )
+        if not docs and self._renderer is not None and resp.content_type.startswith("text/html"):
+            rendered_docs, rendered_links = self._render(url)
+            docs.extend(rendered_docs)
+            links.extend(rendered_links)
         for doc in docs:
             self.store.upsert_document(doc)
         n_new = self.enqueue(links, depth=depth + 1, source=url)
         return len(docs), n_new
+
+    def _render(self, url: str) -> tuple[list[Document], list[str]]:
+        """Atver lapu pārlūkā: nolasa uzzīmēto tekstu un pieraksta datu pieprasījumus."""
+        from .browser import BrowserUnavailable
+
+        try:
+            page = self._renderer.read(url)  # type: ignore[union-attr]
+        except BrowserUnavailable as exc:
+            self.on_event("render", {"url": url, "kļūda": str(exc)})
+            self._renderer = None  # vairs nemēģinām
+            return [], []
+        except Exception as exc:  # noqa: BLE001
+            self.on_event("render", {"url": url, "kļūda": repr(exc)})
+            return [], []
+
+        ids = ids_from_url(url, self.profile)
+        docs: list[Document] = []
+        # Slieksnis šeit ir zemāks nekā HTML ceļā: ja lapu apzināti atvērām
+        # pārlūkā, pat īss uzzīmēts fragments ir saturs, nevis navigācija.
+        if len(page.text) >= _MIN_RENDERED_TEXT:
+            docs.append(
+                build_document(
+                    url=url,
+                    kind="web",
+                    source_type="browser",
+                    text=page.text,
+                    title=page.title,
+                    profile=self.profile,
+                    issue_id=ids["issue_id"],
+                    article_id=ids["article_id"],
+                    page_number=int(ids["page"]) if ids["page"].isdigit() else None,
+                    metadata={"uzzīmēts_pārlūkā": True,
+                              "datu_pieprasījumi": [c.url for c in page.data_calls()][:20]},
+                )
+            )
+        # Datu slāņa URL ir vērtīgāki par HTML saitēm — tos liekam frontē pirmos.
+        links = [c.url for c in page.data_calls()] + list(page.links)
+        self.on_event("render", {"url": url, "teksts": len(page.text),
+                                 "datu_pieprasījumi": len(page.data_calls())})
+        return docs, links
 
     # -- mērķtiecīga viena laidiena ielāde -------------------------------
     def crawl_issue(self, issue_id: str, *, max_pages: int = 0) -> list[Document]:

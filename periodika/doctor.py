@@ -209,6 +209,15 @@ def run_diagnostics(config=None, *, check_network: bool = True) -> Report:
             detail=f"uzstādītas: {', '.join(sorted(langs)) or '-'}",
             hint=f"Trūkst valodu datnes: {', '.join(sorted(needed))}",
         ))
+    from .browser import browser_available
+
+    browser = browser_available()
+    report.add(Check(
+        name="Headless pārlūks (SPA lapu lasīšana)", ok=bool(browser["pieejams"]),
+        detail=browser.get("chromium") or ("playwright nav uzstādīts"
+                                           if not browser["playwright"] else "Chromium nav atrasts"),
+        hint=browser.get("norāde") or "",
+    ))
     poppler = shutil.which("pdftoppm")
     report.add(Check(
         name="poppler (PDF -> attēli)", ok=bool(poppler), detail=poppler or "nav atrasts",

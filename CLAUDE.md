@@ -50,6 +50,17 @@ tekstam — nemēģini normalizēt vācu rakstu ar `old_to_modern`, tas to saboj
 presē datums parasti ir Jūlija kalendārā — ja raksti par datējumu, saki, kurš
 stils ir domāts (`calendar` lauks to pasaka).
 
+## Kad lapa neko neatdod
+periodika2-viewer ir SPA — teksta HTML avotā nav. Secība:
+1. `periodika_browse_page` — atver lapu īstā pārlūkā un nolasa uzzīmēto.
+2. `periodika_discover_endpoints` — no lietotnes pieprasījumiem uzģenerē METS/ALTO
+   veidnes un ieraksta profilā.
+3. Tālāk rāpo **bez pārlūka**, pa datu slāni. Pārlūks ir veids, kā ceļu atrast,
+   nevis ikdienas darbarīks: tas ir lēns un noslogo bibliotēkas serveri vairāk.
+
+Ja teksts ir tikai attēlā, ņem `browse` ekrānuzņēmumu un padod to
+`periodika_read_image`.
+
 ## Kad jālasa attēls vai rokraksts
 1. `periodika_recognition_engines` — pārbaudi, kas vidē ir pieejams.
 2. `periodika_read_image` ar `engine="agent"` (noklusējums) sagatavo attēlu un

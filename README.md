@@ -12,6 +12,7 @@ Trīs daļas:
 | **Nolasītājs** | METS + ALTO (un TEI) parsēšana: no OCR blokiem uz veseliem rakstiem ar virsrakstu, datumu, lappusi un OCR ticamību. |
 | **Vecā druka** | Fraktur OCR tīrīšana, vecās ortogrāfijas pārrakstīšana mūsdienu rakstībā un vaicājumu paplašināšana pretējā virzienā. |
 | **Latviešu valoda** | Celmošana un locīšana, vārdnīca vecā `s`/`z` izšķiršanai, valodas noteikšana, latviskie datumi ar veco/jauno stilu, vēsturiskie vietvārdi. |
+| **Ieiešana lapā** | Headless Chromium atver SPA skatītāju, nolasa uzzīmēto tekstu un pieraksta, no kurienes lietotne ņem datus. |
 | **Attēli un rokraksts** | Skenējuma sagatavošana, rindu sagriešana, OCR/HTR dzinēju adapteri, PAGE XML/hOCR ievade un Fraktur/Kurrent kļūdu labošana pēc vārdnīcas. |
 
 Nav nevienas ārējas atkarības — tikai Python 3.11+ standarta bibliotēka.
@@ -29,7 +30,7 @@ strādā ar standarta bibliotēku vien.
 ```bash
 git clone <šis repo> periodika-agent && cd periodika-agent
 ./install.sh          # virtuālā vide + uzstādīšana + pārbaude
-./install.sh --all    # arī attēlu apstrāde (Pillow) un Anthropic SDK
+./install.sh --all    # arī pārlūks (SPA), attēlu apstrāde un Anthropic SDK
 source .venv/bin/activate
 ```
 
@@ -99,6 +100,11 @@ periodika engines                                # kas šajā vidē pieejams
 periodika read vestule.jpg --handwriting         # rokraksta nolasīšana
 periodika read lapa.png --engine tesseract --langs lav+frk
 periodika correct ocr.txt --handwriting          # kļūdu labošana
+
+# 6. Ieiešana lapā (SPA)
+periodika browse "<skatītāja saite>"             # nolasīt uzzīmēto tekstu
+periodika sniff "<skatītāja saite>" --save-profile   # atrast datu galapunktus
+periodika crawl --render                         # rāpot ar pārlūku, kur vajag
 ```
 
 Ja neuzstādīji ar `pip`, `periodika` vietā raksti `python3 -m periodika`.
@@ -141,6 +147,8 @@ Pieejamie rīki:
 | `periodika_read_image` | Nolasa skenējumu — druku vai rokrakstu. |
 | `periodika_correct_text` | Labo Fraktur/Kurrent atpazīšanas kļūdas pēc vārdnīcas. |
 | `periodika_recognition_engines` | Kuri atpazīšanas dzinēji šajā vidē pieejami. |
+| `periodika_browse_page` | Atver lapu īstā pārlūkā un nolasa uzzīmēto saturu. |
+| `periodika_discover_endpoints` | Noskaidro lietotnes datu galapunktus un uzraksta profilu. |
 | `periodika_probe` | Noskaidro vietnes galapunktus un saglabā profilu. |
 | `periodika_status` | Frontes, krātuves un HTTP statistika. |
 
@@ -275,6 +283,60 @@ transkripcija. Zinātniskam citātam lieto `text_raw` un saiti uz skenējumu
 
 ---
 
+## Ieiešana lapā (SPA)
+
+`periodika2-viewer` ir vienas lapas lietotne: HTML avotā teksta **nav**, tas
+ienāk ar JavaScript. Parasts HTTP pieprasījums tur neatrod neko. Tāpēc rīks prot
+atvērt lapu īstā pārlūkā (headless Chromium) un nolasīt to, kas uzzīmēts.
+
+```bash
+pip install 'periodika-agent[browser]' && python -m playwright install chromium
+# vai: ./install.sh --browser
+
+periodika browse "https://periodika.lndb.lv/periodika2-viewer/?lang=lv#panel:pa|issue:/<ID>|page:1"
+```
+
+Gaidīšana ir divpakāpju: vispirms tīkla rimšana, tad teksta stabilizēšanās —
+lietotnes mēdz zīmēt pakāpeniski, un `networkidle` viens pats nostrādā par agru.
+Ja Chromium jau ir uz datora, to var norādīt ar `PERIODIKA_CHROMIUM=/ceļš/uz/chrome`
+un neko nelejupielādēt.
+
+### Svarīgākais: datu slāņa atklāšana
+
+Pārlūks pieraksta **katru** pieprasījumu, ko lietotne izdara — tur redzams, no
+kurienes tā ņem METS/ALTO. `sniff` to vispārina līdz URL veidnēm un ieraksta
+profilā:
+
+```bash
+periodika sniff "<skatītāja saite>" --issue p_001_bw1899n01 --save-profile
+```
+
+```json
+{"veidnes": [
+   {"kind": "mets", "template": ".../periodika2-data/{issue}/mets.xml"},
+   {"kind": "alto", "template": ".../periodika2-data/{issue}/alto/{n:08d}.xml"}]}
+```
+
+Pēc tam pārlūks vairs nav vajadzīgs: rāpulis strādā tieši ar datu slāni — ātri,
+pieklājīgi un ar pilnu rakstu struktūru. **Tas ir ieteicamais ceļš**; pārlūks ir
+veids, kā to ceļu atrast, nevis ikdienas darbarīks.
+
+### Rāpošana ar renderēšanu
+
+```bash
+periodika crawl --render --render-save-data ./dati
+```
+
+Ar `--render` lapas, kurās HTML avotā teksta nav, tiek atvērtas pārlūkā:
+uzzīmētais teksts kļūst par dokumentu, bet atrastie datu URL nonāk frontē ar
+prioritāti — tā rāpulis pats pāriet no lēnā ceļa uz ātro. Profila karogs
+`requires_javascript` renderēšanu ieslēdz arī bez `--render`.
+
+Ja teksts ir tikai attēlā, `browse --screenshot lapa.png` saglabā ekrānuzņēmumu,
+ko var padot `periodika read` — un tālāk iet parastā atpazīšanas plūsma.
+
+---
+
 ## Rokraksts un attēli
 
 Rāpulis strādā ar to, kas periodikā jau ir OCR'ots. Bet daudz kas ir tikai
@@ -377,13 +439,14 @@ periodika/
   latvian.py      celmošana, locīšana, leksikons, valodas noteikšana,
                   datumi (vecais/jaunais stils), vēsturiskie vietvārdi
   data/lv_wordlist.txt  latviešu vārdu saraksts s/z izšķiršanai
+  browser.py      headless Chromium: SPA nolasīšana un datu galapunktu atklāšana
   images.py       skenējuma sagatavošana un rindu sagriešana (Pillow, neobligāts)
   recognize.py    OCR/HTR dzinēju adapteri + transkripcijas uzvedne
   correct.py      Fraktur/Kurrent kļūdu labošana pēc vārdnīcas
   pagexml.py      PAGE XML un hOCR (HTR dzinēju izvade)
   cli.py          komandrinda
   mcp_server.py   MCP rīki Claude aģentam
-tests/            138 testi, bez tīkla un bez ārējiem dzinējiem
+tests/            177 testi; tīkla vietā vietējs sintētisks skatītājs
 ```
 
 ## Testi

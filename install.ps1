@@ -6,14 +6,16 @@
 param(
     [switch]$All,
     [switch]$Images,
+    [switch]$Browser,
     [switch]$NoVenv
 )
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
 $extras = ""
-if ($Images) { $extras = "[images]" }
-if ($All)    { $extras = "[images,claude]" }
+if ($Images)  { $extras = "[images]" }
+if ($Browser) { $extras = "[browser]" }
+if ($All)     { $extras = "[images,claude,browser]" }
 
 $python = "python"
 if (-not (Get-Command $python -ErrorAction SilentlyContinue)) {
@@ -33,6 +35,11 @@ if (-not $NoVenv) {
 Write-Host "==> Uzstādu periodika-agent$extras"
 & $python -m pip install --quiet --upgrade pip
 & $python -m pip install --quiet -e ".$extras"
+
+if ($All -or $Browser) {
+    Write-Host "==> Lejupieladeju Chromium (SPA lapu lasisanai)"
+    & $python -m playwright install chromium
+}
 
 Write-Host "==> Sistēmas rīki (neobligāti)"
 foreach ($tool in @("tesseract", "pdftoppm")) {
