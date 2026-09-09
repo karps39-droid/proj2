@@ -116,12 +116,24 @@ class SiteProfile:
     plaintext_url_template: str = ""
     iiif_manifest_template: str = ""
     viewer_url_template: str = ""
+    #: Pilna laidiena PDF (LNB: vienīgais anonīmi pieejamais pilnteksts).
+    pdf_url_template: str = ""
+
+    # --- RDF metadatu grafs ----------------------------------------------
+    #: LNB atklāj visu krājumu kā RDF/ORE grafu; sk. `iter_rdf_aggregates`.
+    rdf_sitemap_url: str = ""
+    rdf_periodic_template: str = ""
+    rdf_issue_template: str = ""
+    rdf_article_template: str = ""
 
     # --- URL atpazīšana ---------------------------------------------------
     #: Regex, kas URL/fragmentā atrod laidiena ID (grupa "id").
     issue_id_patterns: list[str] = field(
         default_factory=lambda: [
             r"issue:/?(?P<id>[A-Za-z0-9_\-.]+)",
+            # LNB dzīvē lieto skaitliskus laidienu ID (piem. 676700)
+            r"/rdf/periodics/issue/(?P<id>\d+)",
+            r"[?&]id=l_(?P<id>\d+)",
             r"/issue/(?P<id>[A-Za-z0-9_\-.]+)",
             r"[?&]issue=(?P<id>[A-Za-z0-9_\-.]+)",
             # LNB laidiena ID formā p_001_xxxx1899n01 — der arī datu slāņa ceļos
@@ -197,6 +209,10 @@ class SiteProfile:
 PROBE_CANDIDATES: dict[str, list[str]] = {
     "robots": ["{base}/robots.txt"],
     "sitemap": [
+        # Pārbaudīts dzīvē 2026-09-09: šis ir vienīgais, kas periodika.lndb.lv
+        # tiešām atbild. Uz to norāda saknes HTML <link rel="alternate"
+        # type="application/rdf+xml">; parastais /sitemap.xml ir 404.
+        "{base}/rdf/periodika/sitemap",
         "{base}/sitemap.xml",
         "{base}/sitemap_index.xml",
         "{base}/sitemap-index.xml",
@@ -245,7 +261,17 @@ PROBE_CANDIDATES: dict[str, list[str]] = {
 }
 
 #: Zināmie LNB METS/ALTO izkārtojumi, ko probe pārbauda pret paraugu laidienu.
+#:
+#: UZMANĪBU: `resource?set=...` nezināmu `set` vērtību gadījumā klusi atdod JPEG
+#: ar HTTP 200 (pārbaudīts: set=ALTO/TEXT/OCR/METS/TEI visi atdeva vienu un to
+#: pašu 11681 baitu attēlu). Tāpēc statuss 200 te nav pierādījums — probe
+#: pārbauda arī satura tipu.
 ISSUE_RESOURCE_CANDIDATES: dict[str, list[str]] = {
+    "pdf": [
+        # Pilns laidiena PDF ar OCR teksta slāni; vienīgais anonīmi pieejamais
+        # pilnteksta avots (raksta līmeņa action/getocrtext prasa LNB kontu).
+        "{base}/resource?set=PDF&id=l_{issue}",
+    ],
     "mets": [
         "{base}/periodika2-data/{issue}/mets.xml",
         "{base}/periodika2-data/{issue}/METS.xml",

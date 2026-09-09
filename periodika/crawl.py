@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Sequence
 
 from .config import Config
-from .discovery import iter_oai_identifiers, iter_sitemap_urls
+from .discovery import iter_oai_identifiers, iter_rdf_aggregates, iter_sitemap_urls
 from .extract import build_document, documents_from_response, ids_from_url
 from .http_client import FetchError, HttpClient
 from .store import Document, Store
@@ -203,7 +203,18 @@ class Crawler:
         return added
 
     # -- sēklas ---------------------------------------------------------
-    def seed(self, extra_seeds: Sequence[str] = ()) -> int:
+    def seed(self, extra_seeds: Sequence[str] = (), *, time_budget: float = 0.0) -> int:
+        """Sagatavo fronti. ``time_budget`` ierobežo RDF kataloga uzskaitīšanu.
+
+        Bez tā pirmā palaišana pret periodika.lndb.lv 1820 izdevumus pie 1 pieprasījuma
+        sekundē uzskaitītu ~pusstundu, pirms vispār sāktos rāpošana. Uzskaitīšana ir
+        atsākama: aizpildītā fronte glabājas SQLite, un nākamā palaišana turpina.
+        """
+        started = time.time()
+
+        def out_of_time() -> bool:
+            return bool(time_budget) and (time.time() - started) > time_budget
+
         base = self.profile.base_url.rstrip("/")
         seeds = [base + "/", *self.profile.seeds, *extra_seeds]
         added = self.enqueue(seeds, depth=0, source="seed")
@@ -217,6 +228,27 @@ class Crawler:
                     batch.clear()
             added += self.enqueue(batch, depth=1, source=sitemap)
             self.on_event("sitemap", {"url": sitemap, "kopā": added})
+
+        # RDF/ORE katalogs: periodika.lndb.lv "sitemap" ir RDF, nevis <urlset>,
+        # tāpēc to uzskaita atsevišķi — izdevumi -> laidieni. Rakstu līmenī
+        # neejam: raksta teksts prasa sesiju, un laidiena ieraksts jau satur
+        # visu, kas vajadzīgs, ieskaitot PDF ar OCR slāni.
+        if self.profile.rdf_sitemap_url:
+            titles = 0
+            issues = 0
+            for periodic_url in iter_rdf_aggregates(
+                self.client, self.profile.rdf_sitemap_url, only="/rdf/periodics/"
+            ):
+                if out_of_time():
+                    self.on_event("rdf-daļēji", {"uzskaitīti_izdevumi": titles})
+                    break
+                titles += 1
+                added += self.enqueue([periodic_url], depth=1,
+                                      source=self.profile.rdf_sitemap_url)
+                batch = list(iter_rdf_aggregates(self.client, periodic_url, only="/issue/"))
+                issues += len(batch)
+                added += self.enqueue(batch, depth=2, source=periodic_url)
+            self.on_event("rdf", {"izdevumi": titles, "laidieni": issues, "kopā": added})
 
         for endpoint in self.profile.oai_endpoints:
             n = 0

@@ -30,6 +30,7 @@ import sys
 from argparse import SUPPRESS
 from pathlib import Path
 
+from . import force_utf8_io
 from .config import Config
 from .crawl import CrawlLimits, Crawler
 from .discovery import probe_site
@@ -121,9 +122,6 @@ def cmd_crawl(args: argparse.Namespace) -> int:
         render=args.render, render_save_data_to=args.render_save_data,
         via_browser=cfg.policy.via_browser,
     )
-    if not args.resume:
-        added = crawler.seed(args.seed or ())
-        print(f"Sēklas frontē: +{added}", file=sys.stderr)
     limits = CrawlLimits(
         max_urls=args.max_urls,
         max_documents=args.max_docs,
@@ -131,6 +129,11 @@ def cmd_crawl(args: argparse.Namespace) -> int:
         time_budget=args.time,
         max_pages_per_issue=args.max_pages_per_issue,
     )
+    if not args.resume:
+        # Uzskaitīšanai atvēlam pusi no laika budžeta, lai pirmajā palaišanā
+        # paliktu laiks arī pašai rāpošanai; atlikušo turpina nākamā reize.
+        added = crawler.seed(args.seed or (), time_budget=limits.time_budget / 2)
+        print(f"Sēklas frontē: +{added}", file=sys.stderr)
     result = crawler.run(limits)
     _print({"rezultāts": result.as_dict(), "statuss": crawler.status()}, args.json)
     return 0
@@ -685,6 +688,7 @@ GLOBAL_DEFAULTS = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    force_utf8_io()
     parser = build_parser()
     args = parser.parse_args(argv)
     for key, value in GLOBAL_DEFAULTS.items():

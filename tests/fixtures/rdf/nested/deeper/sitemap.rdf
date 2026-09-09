@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Saīsināts paraugs no dzīvās periodika.lndb.lv atbildes (2026-09-09):
+     https://periodika.lndb.lv/rdf/periodika/sitemap -->
+<rdf:RDF
+   xmlns:ore="http://www.openarchives.org/ore/terms/"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xml:base="http://null/"
+>
+  <rdf:Description rdf:about="backend/rdf/periodika/sitemap">
+    <ore:aggregates rdf:resource="rdf/periodics/2107"/>
+    <ore:aggregates rdf:resource="rdf/periodics/221"/>
+    <ore:aggregates rdf:resource="rdf/periodics/1950"/>
+  </rdf:Description>
+</rdf:RDF>

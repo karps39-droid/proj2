@@ -220,8 +220,9 @@ class TestImages(unittest.TestCase):
             src = Path(tmp) / "page.png"
             Image.new("L", (400, 200), color=255).save(src)
             result = images_mod.preprocess(src, Path(tmp) / "out.png")
-        self.assertTrue(result.path.exists())
-        self.assertTrue(result.steps)
+            # pārbaudām, kamēr pagaidu mape vēl pastāv
+            self.assertTrue(result.path.exists())
+            self.assertTrue(result.steps)
 
     def test_preprocess_without_pillow_raises_actionable_error(self):
         if images_mod.capabilities()["pillow"]:

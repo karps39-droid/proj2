@@ -24,6 +24,7 @@ import sys
 import traceback
 from typing import Any, Callable
 
+from . import force_utf8_io
 from .config import Config
 from .crawl import CrawlLimits, Crawler
 from .discovery import probe_site
@@ -656,6 +657,8 @@ def build_tools(config: Config) -> dict[str, tuple[dict, Callable[[dict], Any]]]
 
 def serve(config: Config | None = None, stdin=None, stdout=None) -> None:
     """Apkalpo MCP stdio sesiju līdz straumes beigām."""
+    if stdin is None and stdout is None:
+        force_utf8_io()
     config = config or Config.load()
     tools = build_tools(config)
     fin = stdin or sys.stdin

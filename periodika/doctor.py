@@ -173,10 +173,16 @@ def run_diagnostics(config=None, *, check_network: bool = True) -> Report:
     )
 
     def lexicon() -> tuple[bool, str]:
-        from .latvian import default_lexicon
+        from .latvian import _wordlist_path, default_lexicon
 
         lex = default_lexicon()
-        return len(lex) > 100, f"{len(lex)} vārdformas"
+        path = _wordlist_path()
+        # Vietvārdi leksikonā nonāk vienmēr, tāpēc pēc `len` vien nepietiek:
+        # bez vārdu saraksta faila to ir ap 190, un pārbaude izskatītos zaļa,
+        # kamēr s/z izšķiršana un pēclabošana nestrādā nemaz.
+        if not path.exists():
+            return False, f"nav atrasts vārdu saraksts: {path}"
+        return len(lex) > 100, f"{len(lex)} vārdformas ({path.name})"
 
     _check(
         report, "Latviešu leksikons", lexicon,

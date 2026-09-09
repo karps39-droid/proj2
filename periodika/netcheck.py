@@ -237,11 +237,14 @@ def _check_http(url: str, *, user_agent: str, ca_bundle: str, proxy: str,
     policy.ca_bundle = ca_bundle
     policy.proxy = proxy
     client = HttpClient(policy)
-    # Ja dots tikai saimniekdators, pārbaudām robots.txt; ja pilns ceļš — to pašu.
+    # Pārbaudām to pašu ceļu, ko rāpulis tiešām ņems (saimniekdatoram — sakni).
+    # Agrāk šeit tika ņemts /robots.txt, bet tas ir neobligāts fails: uz
+    # periodika.lndb.lv tā nav vispār, un 404 tika nolasīts kā "vietne bloķē
+    # klientu", kas aizsūtīja lietotāju uz lieko un lēno --via-browser.
     parts = urllib.parse.urlsplit(url)
     target = (
-        urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", ""))
-        if parts.path in ("", "/")
+        urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+        if parts.path == ""
         else url
     )
     try:
@@ -264,6 +267,11 @@ def _check_http(url: str, *, user_agent: str, ca_bundle: str, proxy: str,
         if status in (502, 503, 504):
             return Layer("HTTP", False, f"{target}: HTTP {status}",
                          remedy="Vietne pati nav pieejama. Pamēģini vēlāk.")
+        if status == 404:
+            # Serveris atbildēja — HTTP slānis strādā. Tas, ka šī ceļa nav, ir
+            # atsevišķs jautājums, un to nedrīkst jaukt ar bloķēšanu.
+            return Layer("HTTP", True,
+                         f"{target}: HTTP 404 (serveris atbild, bet šī ceļa nav)")
         return Layer("HTTP", False, f"{target}: {exc.message}",
                      remedy="Skaties iepriekšējos slāņus — kļūda nāk no zemāka līmeņa.")
     return Layer("HTTP", True, f"{resp.url}: HTTP {resp.status}, {len(resp.body)} baiti")

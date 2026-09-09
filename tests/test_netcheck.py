@@ -10,6 +10,7 @@ import http.server
 import socket
 import socketserver
 import threading
+import os
 import unittest
 from pathlib import Path
 
@@ -48,6 +49,28 @@ class _Server:
 class _PlainHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(SPA_DIR), **kwargs)
+
+    def log_message(self, *args):  # noqa: A003
+        pass
+
+
+class _NoRobotsHandler(http.server.BaseHTTPRequestHandler):
+    """Atdarina periodika.lndb.lv: sakne atbild, bet robots.txt nav (404).
+
+    Tieši šī forma agrāk tika nolasīta kā "vietne bloķē klientu", jo HTTP slānis
+    tika pārbaudīts ar /robots.txt, un 404 tur skaitījās kā slāņa kļūme.
+    """
+
+    def do_GET(self):  # noqa: N802
+        if self.path == "/robots.txt":
+            self.send_error(404, "Not Found")
+            return
+        body = b"<html><body>Rihgas Latweeschu Beedriba</body></html>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, *args):  # noqa: A003
         pass
@@ -101,13 +124,24 @@ class TestLayerChecks(unittest.TestCase):
         import os
         from unittest import mock
 
-        # abi mainīgie vienlaikus: vides jau uzstādītais nedrīkst aizēnot mūsējo
-        with mock.patch.dict(os.environ, {"NO_PROXY": "example.com,.lndb.lv",
-                                          "no_proxy": "localhost"}, clear=False):
+        with mock.patch.dict(os.environ,
+                             {"NO_PROXY": "example.com,.lndb.lv,localhost"},
+                             clear=False):
             self.assertTrue(_bypasses_proxy("periodika.lndb.lv"))
             self.assertTrue(_bypasses_proxy("example.com"))
             self.assertTrue(_bypasses_proxy("localhost"))
             self.assertFalse(_bypasses_proxy("periodika.lv"))
+
+    @unittest.skipIf(os.name == "nt",
+                     "uz Windows os.environ nešķir reģistru: abi mainīgie ir viens un tas pats")
+    def test_both_case_variants_are_merged(self):
+        from unittest import mock
+
+        # Uz POSIX no_proxy un NO_PROXY ir divi dažādi mainīgie, un abi ir spēkā.
+        with mock.patch.dict(os.environ, {"NO_PROXY": "example.com",
+                                          "no_proxy": "localhost"}, clear=False):
+            self.assertTrue(_bypasses_proxy("example.com"))
+            self.assertTrue(_bypasses_proxy("localhost"))
 
 
 class TestDiagnosisAgainstLocalSite(unittest.TestCase):
@@ -130,6 +164,26 @@ class TestDiagnosisAgainstLocalSite(unittest.TestCase):
         payload = result.to_json()
         self.assertIn("slāņi", payload)
         self.assertIn("periodika netcheck", result.as_text())
+
+
+class TestSiteWithoutRobotsTxt(unittest.TestCase):
+    """Trūkstošs robots.txt nav bloķēšana (regresija pret dzīvo periodika.lndb.lv)."""
+
+    def setUp(self):
+        self.site = _Server(_NoRobotsHandler)
+        self.addCleanup(self.site.close)
+
+    def test_missing_robots_is_not_reported_as_blocking(self):
+        result = diagnose(self.site.base, check_browser=False)
+        self.assertEqual([l.name for l in result.layers if l.ok is False], [])
+        self.assertIn("kārtībā", result.verdict)
+        self.assertNotIn("--via-browser", result.verdict)
+
+    def test_http_layer_probes_the_root_not_robots(self):
+        result = diagnose(self.site.base, check_browser=False)
+        http_layer = next(l for l in result.layers if l.name == "HTTP")
+        self.assertIs(http_layer.ok, True)
+        self.assertNotIn("robots.txt", http_layer.detail)
 
 
 class TestProxyDenial(unittest.TestCase):

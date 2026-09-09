@@ -29,6 +29,7 @@ from .htmlutil import parse_html
 
 __all__ = [
     "iter_sitemap_urls",
+    "iter_rdf_aggregates",
     "iter_oai_identifiers",
     "oai_records",
     "probe_site",
@@ -187,11 +188,60 @@ def _looks_useful(resp) -> bool:
     ct = resp.content_type
     if ct in ("application/xml", "text/xml", "application/json"):
         return True
+    # Strukturēti tipi ar apakštipa sufiksu: application/rdf+xml (LNB katalogs),
+    # atom+xml, ld+json u.c. Bez šī probe nomet derīgu RDF sitemap kā "nederīgu".
+    if ct.startswith("application/") and (ct.endswith("+xml") or ct.endswith("+json")):
+        return True
     if _JSONISH.match(resp.body[:64]):
         return True
     if ct.startswith("text/html") and len(resp.body) > 500:
         return True
     return ct.startswith("text/")
+
+
+#: LNB RDF grafā saites slēpjas `rdf:resource` atribūtos (ore:aggregates u.c.),
+#: nevis <loc> elementos, tāpēc parastais sitemap lasītājs tur neko neatrod.
+_RDF_RESOURCE_ATTR = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"
+
+
+def iter_rdf_aggregates(
+    client: HttpClient, rdf_url: str, *, only: str = ""
+) -> Iterator[str]:
+    """Atdod visus `rdf:resource` URL no RDF/XML dokumenta (absolūtos).
+
+    periodika.lndb.lv publicē visu krājumu kā ORE agregātu grafu:
+    ``/rdf/periodika/sitemap`` -> ``rdf/periodics/{id}`` -> ``rdf/periodics/issue/{id}``
+    -> ``rdf/periodics/article/{id}``.
+
+    Atsauces ir relatīvas pret **vietnes sakni**, nevis pret pieprasīto ceļu:
+    ``/rdf/periodika/sitemap`` satur ``rdf/periodics/221``, un pareizais
+    rezultāts ir ``/rdf/periodics/221``, nevis ``/rdf/periodika/rdf/periodics/221``.
+    Dokumenta ``xml:base`` ir ``http://null/``, tāpēc to ignorējam.
+
+    ``only`` (piem. ``"issue"``) atlasa tikai tos ceļus, kas satur šo fragmentu.
+    """
+    try:
+        resp = client.get(rdf_url)
+    except FetchError:
+        return
+    try:
+        root = _parse_xml(resp.body)
+    except ET.ParseError:
+        return
+    parts = urllib.parse.urlsplit(resp.url)
+    site_root = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+    seen: set[str] = set()
+    for element in root.iter():
+        target = element.get(_RDF_RESOURCE_ATTR)
+        if not target:
+            continue
+        absolute = urllib.parse.urljoin(site_root, target)
+        if only and only not in absolute:
+            continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        yield absolute
 
 
 def probe_site(
@@ -238,6 +288,21 @@ def probe_site(
     sitemaps = try_urls("sitemap", PROBE_CANDIDATES["sitemap"])
     if sitemaps:
         profile.sitemap_urls = list(dict.fromkeys(profile.sitemap_urls + sitemaps))
+    # RDF/ORE grafs: ne <urlset>, tāpēc parastais sitemap lasītājs to nesaprot.
+    for hit in sitemaps:
+        if "/rdf/" not in hit:
+            continue
+        profile.rdf_sitemap_url = hit
+        profile.rdf_periodic_template = f"{base}/rdf/periodics/{{id}}"
+        profile.rdf_issue_template = f"{base}/rdf/periodics/issue/{{issue}}"
+        profile.rdf_article_template = f"{base}/rdf/periodics/article/{{id}}"
+        profile.pdf_url_template = f"{base}/resource?set=PDF&id=l_{{issue}}"
+        profile.seeds = list(dict.fromkeys(profile.seeds + [hit]))
+        report.notes.append(
+            "Atrasts RDF/ORE katalogs — pilna uzskaitīšana iet caur to "
+            "(izdevumi -> laidieni -> raksti), nevis pa saišu grafu."
+        )
+        break
 
     # OAI-PMH
     oai_hits: list[str] = []

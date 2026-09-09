@@ -15,9 +15,31 @@ Moduļi:
     mcp_server    — MCP (stdio) serveris Claude aģentam
 """
 
+import sys as _sys
+
 __version__ = "0.1.0"
 
+
+def force_utf8_io() -> None:
+    """Nodrošina UTF-8 uz stdin/stdout/stderr arī tad, ja straumes ir novirzītas.
+
+    Uz Windows Python izvēlas kodējumu pēc lokāles (parasti cp1252), tiklīdz
+    izvade nav konsole, bet caurule vai fails. Tad jebkurš `ā` gāž programmu ar
+    UnicodeEncodeError. MCP serveris darbojas tieši pa novirzītu stdio un visa
+    `--json` izvade mēdz tikt novirzīta, tāpēc bez šī uz Windows nestrādā ne
+    `periodika mcp`, ne `periodika doctor --json`.
+    """
+    for stream in (_sys.stdin, _sys.stdout, _sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # jau aizvērta vai nepārkonfigurējama straume
+            pass
+
 __all__ = [
+    "force_utf8_io",
     "config",
     "http_client",
     "htmlutil",
